@@ -1,5 +1,6 @@
 import sys
 
+from collections import deque
 from cambc import Controller, Direction, EntityType, Environment, Position
 
 # Implement BUG + BFS Pathfinding
@@ -12,6 +13,7 @@ class PFState:
         self.bug_dir = None
         self.should_guess_rotation = True
         self.clockwise = False
+        self.bug_cooldown = 4
 pf_state = PFState()
 
 DIRECTIONS = [d for d in Direction if d != Direction.CENTRE]
@@ -21,6 +23,7 @@ DIRECTIONS = [d for d in Direction if d != Direction.CENTRE]
 def pathfind_to(rc: Controller, target: Position):
     global pf_state
 
+    rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
     if pf_state.final_target != target:
         pf_state.final_target = target
         pf_state.virtual_target = rc.get_position()
@@ -29,22 +32,44 @@ def pathfind_to(rc: Controller, target: Position):
         pf_state.best_bug_dist = float('inf')
         pf_state.bug_dir = None
         pf_state.should_guess_rotation = True
-    
+
+    if rc.get_position() == target:
+        return
+
+    if rc.get_position().distance_squared(target) == 1:
+        if rc.can_move(rc.get_position().direction_to(target)):
+            rc.move(rc.get_position().direction_to(target))
+            return
+
     if rc.get_position() == pf_state.virtual_target:
+        pf_state.bug_cooldown = 4
         recompute_virtual_target(rc)
+    else:
+        pf_state.bug_cooldown -= 1
+    
+    if pf_state.bug_cooldown <= 0:
+        pf_state.virtual_target = rc.get_position()
+        print("Detected bug cooldown out ", rc.get_current_round(), rc.get_id(), file=sys.stderr)
+        pf_state.should_bug = False
+        return
 
     pathfind_to_virtual(rc)
+
 
 def recompute_virtual_target(rc: Controller):
     global pf_state
 
     current: Position = pf_state.virtual_target
+
+    # print("Round", rc.get_current_round(), file=sys.stderr)
     
     steps = 0
-    while rc.is_in_vision(current) and steps < 4:
+    while rc.is_in_vision(current) and steps < 3:
         # Stop if reached goal
         if current == pf_state.final_target:
             break
+        # print("Iter --", current, file=sys.stderr)
+
         steps += 1
 
         if pf_state.should_bug:
@@ -67,43 +92,55 @@ def recompute_virtual_target(rc: Controller):
                         break
                     dirR = dirR.rotate_right()
                 locR = current.add(dirR)
+
                 pf_state.clockwise = locL.distance_squared(pf_state.final_target) >= locR.distance_squared(pf_state.final_target)
 
             # Try to find wall-follow dir
-            new_loc = current.add(pf_state.bug_dir)
-            if not virtually_navvable(rc, new_loc):
+            current_loc: Position = None
+            new_loc: Position = current.add(pf_state.bug_dir)
+            if virtually_navvable(rc, new_loc):
+                current_loc = new_loc
+            else:
+                break_flag = False
                 for _ in range(8):
-                    pf_state.bug_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
-                    new_loc = current.add(pf_state.bug_dir)
-                    if virtually_navvable(rc, current.add(pf_state.bug_dir)):
+                    new_loc = current.add(pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left())
+                    if virtually_navvable(rc, new_loc):
+                        current_loc = new_loc
                         break
-            
-            if not virtually_navvable(rc, new_loc):
-                break
+                    elif not is_in_map(new_loc, rc.get_map_width(), rc.get_map_height()):
+                        pf_state.clockwise = not pf_state.clockwise
+                        break_flag = True
+                        break
+                    pf_state.bug_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
 
-            current = new_loc
-            pf_state.bug_dir = pf_state.bug_dir.rotate_right() if not pf_state.clockwise else pf_state.bug_dir.rotate_left()
-            
-            # Circumnav mode exit condition
-            d = current.distance_squared(pf_state.final_target)
-            if d < pf_state.best_bug_dist:
-                pf_state.should_bug = False
-            
-            print("Bug mode: ", current, file=sys.stderr)
+                if break_flag:
+                    break
+
+            if current_loc is not None:
+                if not is_in_map(current_loc, rc.get_map_width(), rc.get_map_height()):
+                    break
+                assert current_loc != current
+                current = current_loc
+                pf_state.bug_dir = pf_state.bug_dir.rotate_right() if not pf_state.clockwise else pf_state.bug_dir.rotate_left()
+                d = current.distance_squared(pf_state.final_target)
+                if d < pf_state.best_bug_dist:
+                    pf_state.should_bug = False
+
+            # print("Bug mode: ", current, file=sys.stderr)
         else:
             # Greedy
             closest = current.distance_squared(pf_state.final_target)
             best = current
-            print("[", file=sys.stderr)
             for d in DIRECTIONS:
                 if virtually_navvable(rc, current.add(d)):
                     nxt = current.add(d)
                     dist = nxt.distance_squared(pf_state.final_target)
-                    print("  ", d, "  ", nxt, " - dist - ", dist, ", ", file=sys.stderr)
                     if dist < closest:
                         closest = dist
                         best = nxt
-            print("]", file=sys.stderr)
+
+            if not rc.is_in_vision(best):
+                break
             
             if best != current:
                 current = best
@@ -111,18 +148,105 @@ def recompute_virtual_target(rc: Controller):
                 pf_state.should_bug = True
                 pf_state.best_bug_dist = current.distance_squared(pf_state.final_target)
                 pf_state.bug_dir = current.direction_to(pf_state.final_target)
-                pf_state.should_guess_rotation = True
+                pf_state.should_guess_rotation = False
             
-            print("Greedy: ", current, file=sys.stderr)
+            # print("Greedy: ", current, file=sys.stderr)
         
         rc.draw_indicator_dot(current, 50, 180, 50)
     
     pf_state.virtual_target = current
-    print(pf_state.virtual_target, file=sys.stderr)
+    # print(pf_state.virtual_target, file=sys.stderr)
     rc.draw_indicator_dot(pf_state.virtual_target, 50, 255, 50)
+
 
 def pathfind_to_virtual(rc: Controller):
     global pf_state
+    
+    my_loc = rc.get_position()
+    goal = pf_state.virtual_target
+
+    best_dir = None
+    best_score = float('-inf')
+
+    to_goal = my_loc.direction_to(goal)
+
+    if my_loc == goal:
+        return
+
+    for d in DIRECTIONS:
+        target = my_loc.add(d)
+
+        # If we can sense the tile
+        if (is_in_map(target, rc.get_map_width(), rc.get_map_height())) and\
+            rc.is_in_vision(target):
+            if rc.get_tile_env(target) == Environment.WALL:
+                continue
+            if rc.get_tile_builder_bot_id(target) is not None:
+                continue
+        else:
+            continue
+
+        # Base score: closer to goal is better
+        score = -(target.distance_squared(goal) * 50)
+
+        # Flow heuristic (look ahead 3 tiles)
+        flow_score = 0
+        test = target
+        for _ in range(3):
+            test = test.add(to_goal)
+            if (is_in_map(test, rc.get_map_width(), rc.get_map_height())) and\
+               (rc.is_in_vision(test) and rc.get_tile_env(test) == Environment.WALL):
+                angle = degrees_between(d, to_goal)
+
+                if angle == 90:
+                    flow_score += 60
+                elif angle == 0:
+                    flow_score -= 40
+                break
+
+        score += flow_score
+
+        if score > best_score:
+            best_score = score
+            best_dir = d
+
+    if best_dir:
+        best_pos = rc.get_position().add(best_dir)
+        if rc.can_move(best_dir):
+            rc.move(best_dir)
+        elif rc.can_build_road(best_pos):
+            rc.build_road(best_pos)
+            if rc.can_move(best_dir):
+                rc.move(best_dir)
+    else:
+        # fallback: reset pathing
+        pf_state.virtual_target = my_loc
+    
+
+def is_in_map(pos: Position, width, height):
+    return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
+
 
 def virtually_navvable(rc: Controller, pos: Position):
-    return rc.is_in_vision(pos) and rc.is_tile_empty(pos)
+    return is_in_map(pos, rc.get_map_width(), rc.get_map_height()) and \
+           ((not rc.is_in_vision(pos)) or (rc.is_in_vision(pos) and actually_navvable(rc, pos)))
+
+def actually_navvable(rc: Controller, pos: Position):
+    return is_in_map(pos, rc.get_map_width(), rc.get_map_height()) and\
+           (rc.is_tile_empty(pos) or rc.is_tile_passable(pos))
+
+DIR_ORDER = [
+    Direction.NORTH, Direction.NORTHEAST, Direction.EAST, Direction.SOUTHEAST,
+    Direction.SOUTH, Direction.SOUTHWEST, Direction.WEST, Direction.NORTHWEST
+]
+DIR_INDEX = {d: i for i, d in enumerate(DIR_ORDER)}
+
+def degrees_between(d1, d2):
+    if d1 == Direction.CENTRE or d2 == Direction.CENTRE:
+        return 0
+
+    diff = abs(DIR_INDEX[d1] - DIR_INDEX[d2])
+    if diff > 4:
+        diff = 8 - diff
+
+    return diff * 45

@@ -18,7 +18,7 @@ class Player:
         
         start_turn(rc)
         if etype == EntityType.CORE:
-            if self.count == 0:
+            if self.count < 12:
                 run_core(rc)
                 self.count += 1
                 
@@ -60,4 +60,4 @@ def run_builder(rc: Controller):
     # marker_pos = rc.get_position().add(random.choice(DIRECTIONS))
     # if rc.can_place_marker(marker_pos):
     #     rc.place_marker(marker_pos, rc.get_current_round())
-    pathfind.pathfind_to(rc, Position(37, 10))
+    pathfind.pathfind_to(rc, Position(6, 5))
