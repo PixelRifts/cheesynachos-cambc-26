@@ -59,7 +59,7 @@ class BuilderBot(Bot):
     def econ_explore(self):
         next_pos = self.rc.get_position().add(self.explore_dir)
         if not pathfind.is_in_map(next_pos, self.rc.get_map_width(), self.rc.get_map_height()):
-            self.explore_dir = random.choice(DIRECTIONS)
+            self.explore_dir = biased_random_dir(self.rc)
             return
 
         if self.rc.can_move(self.explore_dir):
@@ -69,7 +69,7 @@ class BuilderBot(Bot):
                 self.rc.build_road(next_pos)
                 self.rc.move(self.explore_dir)
         else:
-            self.explore_dir = random.choice(DIRECTIONS)
+            self.explore_dir = biased_random_dir(self.rc)
     
     def econ_connect(self):
         pass
