@@ -228,8 +228,9 @@ def is_in_map(pos: Position, width, height):
 
 
 def virtually_navvable(rc: Controller, pos: Position):
-    return is_in_map(pos, rc.get_map_width(), rc.get_map_height()) and \
-           ((not rc.is_in_vision(pos)) or (rc.is_in_vision(pos) and actually_navvable(rc, pos)))
+    if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()):
+        return False
+    return ((not rc.is_in_vision(pos)) or (rc.is_in_vision(pos) and (actually_navvable(rc, pos) or rc.get_tile_builder_bot_id(pos) is not None)))
 
 def actually_navvable(rc: Controller, pos: Position):
     return is_in_map(pos, rc.get_map_width(), rc.get_map_height()) and\
