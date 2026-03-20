@@ -1,7 +1,9 @@
 import sys
+import random
 
+from helpers import degrees_between, cardinal_direction_to, is_in_map, DIRECTIONS, CARDINAL_DIRECTIONS
 from collections import deque
-from cambc import Controller, Direction, EntityType, Environment, Position
+from cambc import Controller, Direction, EntityType, Environment, Position, GameError
 
 # Implement BUG + BFS Pathfinding
 class PFState:
@@ -26,9 +28,6 @@ class PFState:
         self.bug_cooldown = 4
 pf_state = PFState()
 
-DIRECTIONS = [d for d in Direction if d != Direction.CENTRE]
-CARDINAL_DIRECTIONS = [Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST]
-
 # This is a 2 tier-ed approach, that I implemented for MIT Battlecode translated to python
 # Could have bugs, subject to change
 def fast_pathfind_to(rc: Controller, target: Position):
@@ -41,12 +40,12 @@ def fast_pathfind_to(rc: Controller, target: Position):
         pf_state.virtual_target = rc.get_position()
         
     if rc.get_position() == target:
-        return
+        return True
 
     if rc.get_position().distance_squared(target) == 1:
         if rc.can_move(rc.get_position().direction_to(target)):
             rc.move(rc.get_position().direction_to(target))
-            return
+            return True
 
     if rc.get_position() == pf_state.virtual_target:
         pf_state.bug_cooldown = 4
@@ -57,9 +56,13 @@ def fast_pathfind_to(rc: Controller, target: Position):
     if pf_state.bug_cooldown <= 0:
         pf_state.virtual_target = rc.get_position()
         pf_state.should_bug = False
-        return
+        return False
 
     fast_pathfind_to_virtual(rc)
+    if rc.get_position() == target:
+        return True
+    return False
+
 
 
 def recompute_fast_virtual_target(rc: Controller):
@@ -241,12 +244,12 @@ def cardinal_pathfind_to(rc: Controller, target: Position, home: Position):
         pf_state.virtual_target = rc.get_position()
     
     if rc.get_position() == target:
-        return
+        return True
 
     if rc.get_position().distance_squared(target) == 1:
         if rc.can_move(rc.get_position().direction_to(target)):
             rc.move(rc.get_position().direction_to(target))
-            return
+            return True
 
     if rc.get_position() == pf_state.virtual_target:
         pf_state.bug_cooldown = 4
@@ -257,9 +260,12 @@ def cardinal_pathfind_to(rc: Controller, target: Position, home: Position):
     if pf_state.bug_cooldown <= 0:
         pf_state.virtual_target = rc.get_position()
         pf_state.should_bug = False
-        return
+        return False
 
-    cardinal_pathfind_to_virtual(rc, Direction.EAST)
+    cardinal_pathfind_to_virtual(rc, home)
+    if rc.get_position() == target:
+        return True
+    return False
 
 
 def recompute_cardinal_virtual_target(rc: Controller):
@@ -275,6 +281,10 @@ def recompute_cardinal_virtual_target(rc: Controller):
         if current == pf_state.final_target:
             break
         # print("Iter --", current, file=sys.stderr)
+
+        flag = False
+        if current == Position(21, 15):
+            flag = True
 
         steps += 1
 
@@ -313,7 +323,8 @@ def recompute_cardinal_virtual_target(rc: Controller):
                 for _ in range(8):
                     candidate_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
                     new_loc = current.add(candidate_dir)
-                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir):
+                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir, debug=flag):
+                        if flag: print(candidate_dir, "worked", file=sys.stderr)
                         current_loc = new_loc
                         picked_dir = candidate_dir
                         break
@@ -412,6 +423,11 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
     if best_dir:
         best_pos = rc.get_position().add(best_dir)
         conveyor_dir = best_dir.opposite() if going_home else best_dir
+        goal_entt = rc.get_tile_building_id(best_pos)
+        
+        if rc.get_entity_type(goal_entt) == EntityType.ROAD and rc.get_team(goal_entt) == rc.get_team():
+            rc.destroy(best_pos)
+
         if rc.can_move(best_dir):
             rc.move(best_dir)
         elif rc.can_build_conveyor(best_pos, conveyor_dir):
@@ -421,14 +437,10 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
     else:
         # fallback: reset pathing
         pf_state.virtual_target = my_loc
-    
 
-# === Helpers === (Maybe move to helpers.py)
+# === Helpers ===
 
-def is_in_map(pos: Position, width, height) -> bool:
-    return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
-
-def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Direction) -> bool:
+def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Direction, debug: bool = False) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()):
         return False
     if not rc.is_in_vision(pos):
@@ -440,7 +452,9 @@ def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Dir
         (dx, dy) = incoming_dir.opposite().delta()
         prev = pos.add(incoming_dir.opposite())
         test0 = prev.add(Direction.WEST  if dx == 1 else Direction.EAST)
-        test1 = prev.add(Direction.NORTH if dx == 1 else Direction.SOUTH)
+        test1 = prev.add(Direction.NORTH if dy == 1 else Direction.SOUTH)
+        if debug:
+            print(test0, test1, " testing locs", file=sys.stderr)
 
         if not (is_in_map(test0, rc.get_map_width(), rc.get_map_height()) and is_in_map(test1, rc.get_map_width(), rc.get_map_height())):
             return False
@@ -460,30 +474,4 @@ def actually_navvable(rc: Controller, pos: Position) -> bool:
     return is_in_map(pos, rc.get_map_width(), rc.get_map_height()) and\
            rc.is_in_vision(pos) and (rc.is_tile_empty(pos) or rc.is_tile_passable(pos))
 
-DIRECTIONS_ORDERED = [
-    Direction.NORTH, Direction.NORTHEAST, Direction.EAST, Direction.SOUTHEAST,
-    Direction.SOUTH, Direction.SOUTHWEST, Direction.WEST, Direction.NORTHWEST
-]
-DIRECTIONS_INDEX = {d: i for i, d in enumerate(DIRECTIONS_ORDERED)}
 
-def degrees_between(d1, d2):
-    if d1 == Direction.CENTRE or d2 == Direction.CENTRE:
-        return 0
-
-    diff = abs(DIRECTIONS_INDEX[d1] - DIRECTIONS_INDEX[d2])
-    if diff > 4:
-        diff = 8 - diff
-
-    return diff * 45
-
-def cardinal_direction_to(me: Position, other: Position) -> Direction:
-    dx = other.x - me.x
-    dy = other.y - me.y
-
-    if dx == 0 and dy == 0:
-        return Direction.CENTRE
-
-    if abs(dx) > abs(dy):
-        return Direction.EAST if dx > 0 else Direction.WEST
-    else:
-        return Direction.SOUTH if dy > 0 else Direction.NORTH

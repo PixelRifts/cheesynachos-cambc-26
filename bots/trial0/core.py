@@ -2,9 +2,7 @@ import random
 
 from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position
-
-
-DIRECTIONS = [d for d in Direction if d != Direction.CENTRE]
+from helpers import DIRECTIONS
 
 class Core(Bot):
     def __init__(self, rc: Controller):
@@ -17,7 +15,7 @@ class Core(Bot):
         pass
 
     def turn(self):
-        if self.count < 1:
+        if self.count < 4:
             spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
             if self.rc.can_spawn(spawn_pos):
                 self.rc.spawn_builder(spawn_pos)

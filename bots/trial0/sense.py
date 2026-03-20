@@ -29,6 +29,9 @@ class Sense:
         self.rc = rc
         self.width = rc.get_map_width()
         self.height = rc.get_map_height()
+
+        self.in_vision_nearest_ore_dist = float('inf')
+        self.in_vision_nearest_ore: Position = None
         
         # Grid: None=unknown, 0=empty, 1=wall, 2=ore_titanium, 3=ore_axionite
         # 4-17 = friendly buildings, -4 to -17 = enemy buildings
@@ -40,6 +43,8 @@ class Sense:
     def update(self) -> None:
         """Refresh knowledge from current vision. Call each frame."""
         my_team = self.rc.get_team()
+        self.in_vision_nearest_ore_dist = float('inf')
+        self.in_vision_nearest_ore = None
         for pos in self.rc.get_nearby_tiles():
             self._update_tile(pos, my_team)
     
@@ -57,12 +62,21 @@ class Sense:
             return
         
         env = self.rc.get_tile_env(pos)
+        dist = self.rc.get_position().distance_squared(pos)
         if env == Environment.WALL:
             self._grid[pos.y][pos.x] = 1
         elif env == Environment.ORE_TITANIUM:
             self._grid[pos.y][pos.x] = 2
+            # Mark nearest Ore
+            if dist < self.in_vision_nearest_ore_dist:
+                self.in_vision_nearest_ore_dist = dist
+                self.in_vision_nearest_ore = pos
         elif env == Environment.ORE_AXIONITE:
             self._grid[pos.y][pos.x] = 3
+            # Mark nearest Ore
+            if dist < self.in_vision_nearest_ore_dist:
+                self.in_vision_nearest_ore_dist = dist
+                self.in_vision_nearest_ore = pos
         elif env == Environment.EMPTY:
             self._grid[pos.y][pos.x] = 0
     
