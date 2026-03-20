@@ -1,6 +1,8 @@
-
 import pathfind
 import random
+
+import sense
+import visualize
 
 from enum import Enum
 from bot import Bot
@@ -30,10 +32,10 @@ class BuilderBot(Bot):
         self.state = BotState.ECON_EXPLORE
 
         self.explore_dir = random.choice(DIRECTIONS)
+        self.sense = sense.Sense(rc)
 
     def start_turn(self):
-        # TODO: senses update
-        pass
+        self.sense.update()
 
     def turn(self):
         match self.state:
@@ -53,7 +55,9 @@ class BuilderBot(Bot):
 
     def end_turn(self):
         # Compute symmetry if time left
-        pass
+        # DEBUG: sensing
+        # if self.rc.get_current_round() % 50 == 0:
+        #    visualize.visualize_map_minimal(self.rc, self.sense)
 
     # Econ Turns
     def econ_explore(self):
