@@ -56,8 +56,8 @@ class BuilderBot(Bot):
     def end_turn(self):
         # Compute symmetry if time left
         # DEBUG: sensing
-        # if self.rc.get_current_round() % 50 == 0:
-        #    visualize.visualize_map_minimal(self.rc, self.sense)
+        # visualize.visualize_map_minimal(self.rc, self.sense)
+        pass
 
     # Econ Turns
     def econ_explore(self):

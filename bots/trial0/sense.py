@@ -1,19 +1,37 @@
 from cambc import Controller, Environment, Position, EntityType
 from typing import Optional, List
 
+_BUILDING_OFFSET = 4
+
+_ENTITY_TYPE_TO_VALUE = {
+    EntityType.CORE: 4,
+    EntityType.GUNNER: 5,
+    EntityType.SENTINEL: 6,
+    EntityType.BREACH: 7,
+    EntityType.LAUNCHER: 8,
+    EntityType.CONVEYOR: 9,
+    EntityType.SPLITTER: 10,
+    EntityType.ARMOURED_CONVEYOR: 11,
+    EntityType.BRIDGE: 12,
+    EntityType.HARVESTER: 13,
+    EntityType.FOUNDRY: 14,
+    EntityType.ROAD: 15,
+    EntityType.BARRIER: 16,
+    EntityType.MARKER: 17,
+}
+
+_VALUE_TO_ENTITY_TYPE = {v: k for k, v in _ENTITY_TYPE_TO_VALUE.items()}
+
 class Sense:
     """Persistent map knowledge stored as a grid."""
-    # Grid: None=unknown,
-    # 0=empty,
-    # 1=wall,
-    # 2=ore_titanium,
-    # 3=ore_axionite
-    # >=4 = building (positive=friendly, negative=enemy), actual_id (if any) = abs(stored_val) - 4
+    
     def __init__(self, rc: Controller):
         self.rc = rc
         self.width = rc.get_map_width()
         self.height = rc.get_map_height()
         
+        # Grid: None=unknown, 0=empty, 1=wall, 2=ore_titanium, 3=ore_axionite
+        # 4-17 = friendly buildings, -4 to -17 = enemy buildings
         self._grid: List[List[Optional[int]]] = [
             [None for _ in range(self.width)] 
             for _ in range(self.height)
@@ -29,11 +47,13 @@ class Sense:
         """Update grid entry for a visible tile."""
         building_id = self.rc.get_tile_building_id(pos)
         if building_id is not None:
-            stored_id = building_id + 4
-            if self.rc.get_team(building_id) == my_team:
-                self._grid[pos.y][pos.x] = stored_id  # Friendly
-            else:
-                self._grid[pos.y][pos.x] = -stored_id  # Enemy
+            entity_type = self.rc.get_entity_type(building_id)
+            stored_val = _ENTITY_TYPE_TO_VALUE.get(entity_type)
+            if stored_val is not None:
+                if self.rc.get_team(building_id) == my_team:
+                    self._grid[pos.y][pos.x] = stored_val  # Friendly
+                else:
+                    self._grid[pos.y][pos.x] = -stored_val  # Enemy
             return
         
         env = self.rc.get_tile_env(pos)
@@ -48,16 +68,20 @@ class Sense:
     
     # === Query ===
     def get_entity_id(self, pos: Position) -> Optional[int]:
-        """Get building entity ID at position (None if not a building)."""
+        """Get building type value at position (None if not a building)."""
         if not (0 <= pos.x < self.width and 0 <= pos.y < self.height):
             return None
-
         val = self._grid[pos.y][pos.x]
+        if val is None or val in (0, 1, 2, 3):
+            return None
+        return abs(val)
+    
+    def get_building_type(self, pos: Position) -> Optional[EntityType]:
+        """Get EntityType of building at position (None if not a building)."""
+        val = self.get_entity_id(pos)
         if val is None:
             return None
-        if val < 4 and val >= 0:
-            return val
-        return abs(val) - 4  # Convert back to actual game ID
+        return _VALUE_TO_ENTITY_TYPE.get(val)
     
     def is_wall(self, pos: Position) -> bool:
         return self._grid[pos.y][pos.x] == 1 if (0 <= pos.x < self.width and 0 <= pos.y < self.height) else False
@@ -88,10 +112,10 @@ class Sense:
         if not (0 <= pos.x < self.width and 0 <= pos.y < self.height):
             return False
         val = self._grid[pos.y][pos.x]
-        return val is not None and val >= 4
+        return val is not None and val >= _BUILDING_OFFSET
     
     def is_enemy_building(self, pos: Position) -> bool:
         if not (0 <= pos.x < self.width and 0 <= pos.y < self.height):
             return False
         val = self._grid[pos.y][pos.x]
-        return val is not None and val <= -4
+        return val is not None and val <= -_BUILDING_OFFSET
