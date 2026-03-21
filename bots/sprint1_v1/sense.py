@@ -30,6 +30,8 @@ class Sense:
         self.width = rc.get_map_width()
         self.height = rc.get_map_height()
 
+        self.nearest_enemy_infra_dist = float('inf')
+        self.nearest_enemy_infra: Position = None
         self.nearest_bridge_dist = float('inf')
         self.nearest_bridge: Position = None
         self.nearest_ore_dist = float('inf')
@@ -47,6 +49,8 @@ class Sense:
         my_team = self.rc.get_team()
         self.nearest_ore_dist = float('inf')
         self.nearest_ore = None
+        self.nearest_enemy_infra_dist = float('inf')
+        self.nearest_enemy_infra: Position = None
         self.nearest_bridge_dist = float('inf')
         self.nearest_bridge = None
         for pos in self.rc.get_nearby_tiles():
@@ -59,12 +63,22 @@ class Sense:
             entity_type = self.rc.get_entity_type(building_id)
             
             # Mark nearest bridge
+            p = self.rc.get_position(building_id)
+            d = p.distance_squared(self.rc.get_position())
             if entity_type == EntityType.BRIDGE:
-                p = self.rc.get_position(building_id)
-                d = p.distance_squared(self.rc.get_position())
-                if d < self.nearest_bridge_dist:
-                    self.nearest_bridge_dist = d
-                    self.nearest_bridge = p
+                if self.rc.get_team(building_id) == self.rc.get_team():
+                    if d < self.nearest_bridge_dist:
+                        self.nearest_bridge_dist = d
+                        self.nearest_bridge = p
+                else:
+                    if d < self.nearest_enemy_infra_dist:
+                        self.nearest_enemy_infra_dist = d
+                        self.nearest_enemy_infra = p
+            elif entity_type == EntityType.CONVEYOR:
+                if self.rc.get_team(building_id) != self.rc.get_team():
+                    if d < self.nearest_enemy_infra_dist:
+                        self.nearest_enemy_infra_dist = d
+                        self.nearest_enemy_infra = p
 
             stored_val = _ENTITY_TYPE_TO_VALUE.get(entity_type)
             if stored_val is not None:

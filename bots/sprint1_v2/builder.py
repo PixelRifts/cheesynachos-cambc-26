@@ -11,6 +11,7 @@ from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
 
 EXPLORE_TIMEOUT = 16
+NUKE_WAIT_FOR = 500 # Wait 600 turns before starting to nuke
 
 class BotJob(Enum):
     ECONOMY = "Economy"
@@ -22,6 +23,7 @@ class BotState(Enum):
     ECON_TARGET  = "Target"  # Unclaimed ore spotted, Moving towards it
     ECON_CONNECT = "Connect" # Connecting Unclaimed ore to core
     ECON_ENSURE  = "Ensure"  # Ensuring validity of conveyor path
+    ECON_NUKE    = "Nuke"    # Trying this out, go and destroy opponent conveyor/bridge that is free
 
     # States for Defece Job
     DEF_CORE_DEFENCE = "Core Defence"
@@ -63,6 +65,8 @@ class BuilderBot(Bot):
                 self.econ_connect()
             case BotState.ECON_ENSURE:
                 self.econ_ensure()
+            case BotState.ECON_NUKE:
+                self.econ_nuke()
 
             case BotState.DEF_CORE_DEFENCE:
                 self.def_core_defence()
@@ -108,6 +112,14 @@ class BuilderBot(Bot):
             self.pathfind_target = self.sense.nearest_ore.add(best_one_off)
             return
 
+        if self.sense.nearest_enemy_infra is not None:
+            # TODO Check nukability
+            test = random.randint(0, 10)
+            if self.rc.get_current_round() > NUKE_WAIT_FOR and test <= 4:
+                self.state_turn_counter = 0
+                self.state = BotState.ECON_NUKE
+                self.pathfind_target = self.sense.nearest_enemy_infra
+
         # Actual Movement
         self.explore_timeout -= 1
         if self.explore_timeout == 0:
@@ -152,12 +164,8 @@ class BuilderBot(Bot):
         
     
     def econ_connect(self):
-        
-        flag = False
-        if self.rc.get_current_round() == 152:
-            flag = True
         if self.connect_harvester_added == False:
-            if flag: print(self.rc.get_id(), 'trying to check to place harvester ', self.explore_ore_target, end=': ', file=sys.stderr)
+            # print(self.rc.get_id(), 'trying to check to place harvester ', self.explore_ore_target, end=': ', file=sys.stderr)
             
 
             bldg = self.rc.get_tile_building_id(self.explore_ore_target)
@@ -219,6 +227,10 @@ class BuilderBot(Bot):
 
     def econ_ensure(self):
         pass
+
+    def econ_nuke(self):
+        if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
+            self.rc.self_destruct()
 
     def def_core_defence(self):
         pass
