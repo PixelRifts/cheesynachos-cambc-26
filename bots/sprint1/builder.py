@@ -84,11 +84,13 @@ class BuilderBot(Bot):
         if self.should_connect_to_ore(self.sense.nearest_ore):
             best_one_off = None
             best_dist = float('inf')
+            tested = 0
             for cd in CARDINAL_DIRECTIONS:
                 p = self.sense.nearest_ore.add(cd)
                 print('trying dir ', cd, end=' ')
                 if not self.rc.is_in_vision(p):
                     continue
+                tested += 1
                 if not (self.sense.is_empty(p) or self.sense.get_building_type(p) == EntityType.ROAD):
                     continue
                 dist = p.distance_squared(self.core_pos)
@@ -97,7 +99,7 @@ class BuilderBot(Bot):
                     best_one_off = cd
 
             if best_one_off is None:
-                self.explore_blacklist.append(self.sense.nearest_ore)
+                if tested != 4: self.explore_blacklist.append(self.sense.nearest_ore)
                 return
             
             self.state_turn_counter = 0
@@ -195,22 +197,22 @@ class BuilderBot(Bot):
             if self.sense.get_building_type(self.rc.get_position()) == EntityType.ROAD and self.rc.can_destroy(self.rc.get_position()):
                 self.rc.destroy(self.rc.get_position())
                 
-                (best_target, final_one) = self.compute_best_bridge_target()
-                if self.rc.can_build_bridge(self.rc.get_position(), best_target):
-                    self.rc.build_bridge(self.rc.get_position(), best_target)
-                    self.connect_current.append(self.rc.get_position())
-                else:
-                    # print('best_target=',best_target, file=sys.stderr)
-                    return
-                self.connect_current_target = best_target
+            (best_target, final_one) = self.compute_best_bridge_target()
+            if self.rc.can_build_bridge(self.rc.get_position(), best_target):
+                self.rc.build_bridge(self.rc.get_position(), best_target)
+                self.connect_current.append(self.rc.get_position())
+            else:
+                # print('best_target=',best_target, file=sys.stderr)
+                return
+            self.connect_current_target = best_target
 
-                if final_one:
-                    self.state_turn_counter = 0
-                    self.state = BotState.ECON_EXPLORE
-                    self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
-                    self.explore_timeout = EXPLORE_TIMEOUT
-                    self.explore_ore_target = None
-                    return
+            if final_one:
+                self.state_turn_counter = 0
+                self.state = BotState.ECON_EXPLORE
+                self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+                self.explore_timeout = EXPLORE_TIMEOUT
+                self.explore_ore_target = None
+                return
 
         else:
             pathfind.fast_pathfind_to(self.rc, self.connect_current_target)
@@ -336,10 +338,13 @@ class BuilderBot(Bot):
         return (best if best is not None else start, build_finish)
     
     def should_connect_to_ore(self, pos: Position):
-        ret = pos is not None
-        print(pos, '->', ret)
-        ret = ret and not self.sense.get_building_type(pos) == EntityType.HARVESTER
-        print(pos, '->', ret)
-        ret = ret and not self.explore_blacklist.__contains__(pos)
-        print(pos, '->', ret, self.explore_blacklist)
-        return ret
+        if pos is None: return False
+        
+        if self.explore_blacklist.__contains__(pos): return False
+
+        if self.sense.get_building_type(pos) == EntityType.HARVESTER:
+            bldg = self.rc.get_tile_building_id(pos)
+            if self.rc.get_team(bldg) == self.rc.get_team():
+                return False
+        
+        return True
