@@ -33,7 +33,6 @@ pf_state = PFState()
 def fast_pathfind_to(rc: Controller, target: Position):
     global pf_state
 
-    rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
     if pf_state.final_target != target:
         pf_state.reset()
         pf_state.final_target = target
@@ -61,8 +60,9 @@ def fast_pathfind_to(rc: Controller, target: Position):
     fast_pathfind_to_virtual(rc)
     if rc.get_position() == target:
         return True
+    
+    # rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
     return False
-
 
 
 def recompute_fast_virtual_target(rc: Controller):
@@ -73,7 +73,7 @@ def recompute_fast_virtual_target(rc: Controller):
     # print("Round", rc.get_current_round(), file=sys.stderr)
     
     steps = 0
-    while rc.is_in_vision(current) and steps < 3:
+    while rc.is_in_vision(current) and steps < 2:
         # Stop if reached goal
         if current == pf_state.final_target:
             break
@@ -161,11 +161,11 @@ def recompute_fast_virtual_target(rc: Controller):
             
             # print("Greedy: ", current, file=sys.stderr)
         
-        rc.draw_indicator_dot(current, 50, 180, 50)
+        # rc.draw_indicator_dot(current, 50, 180, 50)
     
     pf_state.virtual_target = current
     # print(pf_state.virtual_target, file=sys.stderr)
-    rc.draw_indicator_dot(pf_state.virtual_target, 50, 255, 50)
+    # rc.draw_indicator_dot(pf_state.virtual_target, 50, 255, 50)
 
 
 def fast_pathfind_to_virtual(rc: Controller):
@@ -185,36 +185,11 @@ def fast_pathfind_to_virtual(rc: Controller):
     for d in DIRECTIONS:
         target = my_loc.add(d)
 
-        # If we can sense the tile
-        if (is_in_map(target, rc.get_map_width(), rc.get_map_height())) and\
-            rc.is_in_vision(target):
-            if rc.get_tile_env(target) == Environment.WALL:
-                continue
-            if rc.get_tile_builder_bot_id(target) is not None:
-                continue
-        else:
+        if not actually_navvable(rc, target):
             continue
 
         # Base score: closer to goal is better
         score = -(target.distance_squared(goal) * 50)
-
-        # Flow heuristic (look ahead 3 tiles)
-        flow_score = 0
-        test = target
-        for _ in range(3):
-            test = test.add(to_goal)
-            if (is_in_map(test, rc.get_map_width(), rc.get_map_height())) and\
-               (rc.is_in_vision(test) and rc.get_tile_env(test) == Environment.WALL):
-                angle = degrees_between(d, to_goal)
-
-                if angle == 90:
-                    flow_score += 60
-                elif angle == 0:
-                    flow_score -= 40
-                break
-
-        score += flow_score
-
         if score > best_score:
             best_score = score
             best_dir = d
@@ -470,8 +445,8 @@ def virtually_navvable(rc: Controller, pos: Position) -> bool:
         return False
     return ((not rc.is_in_vision(pos)) or (actually_navvable(rc, pos) or rc.get_tile_builder_bot_id(pos) is not None))
 
+
 def actually_navvable(rc: Controller, pos: Position) -> bool:
     return is_in_map(pos, rc.get_map_width(), rc.get_map_height()) and\
            rc.is_in_vision(pos) and (rc.is_tile_empty(pos) or rc.is_tile_passable(pos))
-
 

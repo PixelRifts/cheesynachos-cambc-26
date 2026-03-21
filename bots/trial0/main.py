@@ -5,6 +5,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position
 import pathfind
 import sense
 
+from helpers import RANDOM_SEED
 from core import Core
 from builder import BuilderBot
 
@@ -12,6 +13,7 @@ from builder import BuilderBot
 class Player:
     def __init__(self):
         self.brain = None
+        random.seed(RANDOM_SEED)
         pass
 
     def run(self, rc: Controller):

@@ -30,8 +30,10 @@ class Sense:
         self.width = rc.get_map_width()
         self.height = rc.get_map_height()
 
-        self.in_vision_nearest_ore_dist = float('inf')
-        self.in_vision_nearest_ore: Position = None
+        self.nearest_bridge_dist = float('inf')
+        self.nearest_bridge: Position = None
+        self.nearest_ore_dist = float('inf')
+        self.nearest_ore: Position = None
         
         # Grid: None=unknown, 0=empty, 1=wall, 2=ore_titanium, 3=ore_axionite
         # 4-17 = friendly buildings, -4 to -17 = enemy buildings
@@ -43,8 +45,10 @@ class Sense:
     def update(self) -> None:
         """Refresh knowledge from current vision. Call each frame."""
         my_team = self.rc.get_team()
-        self.in_vision_nearest_ore_dist = float('inf')
-        self.in_vision_nearest_ore = None
+        self.nearest_ore_dist = float('inf')
+        self.nearest_ore = None
+        self.nearest_bridge_dist = float('inf')
+        self.nearest_bridge = None
         for pos in self.rc.get_nearby_tiles():
             self._update_tile(pos, my_team)
     
@@ -53,6 +57,15 @@ class Sense:
         building_id = self.rc.get_tile_building_id(pos)
         if building_id is not None:
             entity_type = self.rc.get_entity_type(building_id)
+            
+            # Mark nearest bridge
+            if entity_type == EntityType.BRIDGE:
+                p = self.rc.get_position(building_id)
+                d = p.distance_squared(self.rc.get_position())
+                if d < self.nearest_bridge_dist:
+                    self.nearest_bridge_dist = d
+                    self.nearest_bridge = p
+
             stored_val = _ENTITY_TYPE_TO_VALUE.get(entity_type)
             if stored_val is not None:
                 if self.rc.get_team(building_id) == my_team:
@@ -68,15 +81,15 @@ class Sense:
         elif env == Environment.ORE_TITANIUM:
             self._grid[pos.y][pos.x] = 2
             # Mark nearest Ore
-            if dist < self.in_vision_nearest_ore_dist:
-                self.in_vision_nearest_ore_dist = dist
-                self.in_vision_nearest_ore = pos
+            if dist < self.nearest_ore_dist:
+                self.nearest_ore_dist = dist
+                self.nearest_ore = pos
         elif env == Environment.ORE_AXIONITE:
             self._grid[pos.y][pos.x] = 3
             # Mark nearest Ore
-            if dist < self.in_vision_nearest_ore_dist:
-                self.in_vision_nearest_ore_dist = dist
-                self.in_vision_nearest_ore = pos
+            if dist < self.nearest_ore_dist:
+                self.nearest_ore_dist = dist
+                self.nearest_ore = pos
         elif env == Environment.EMPTY:
             self._grid[pos.y][pos.x] = 0
     

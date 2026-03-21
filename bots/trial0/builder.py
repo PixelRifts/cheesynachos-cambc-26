@@ -4,13 +4,13 @@ import random
 
 import sense
 import visualize
-from helpers import DIRECTIONS, cardinal_direction_to
+from helpers import is_adjacent, cardinal_direction_to, biased_random_dir, is_in_map, DIRECTIONS, CARDINAL_DIRECTIONS
 
 from enum import Enum
 from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
 
-EXPLORE_TIMEOUT = 8
+EXPLORE_TIMEOUT = 16
 
 class BotJob(Enum):
     ECONOMY = "Economy"
@@ -31,8 +31,10 @@ class BuilderBot(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
         self.job = BotJob.ECONOMY
+        self.state_turn_counter = 0
         self.state = BotState.ECON_EXPLORE
         self.sense = sense.Sense(rc)
+        self.pathfind_target = None
         
         buildings = rc.get_nearby_buildings(3)
         for b in buildings:
@@ -43,8 +45,10 @@ class BuilderBot(Bot):
         self.explore_dir = self.core_pos.direction_to(rc.get_position())
         self.explore_timeout = EXPLORE_TIMEOUT
         self.explore_ore_target = None
-        self.state_turn_counter = 0
-        self.pathfind_target = None
+        self.explore_blacklist = []
+        self.connect_harvester_added = False
+        self.connect_current_target = None
+        self.connect_current = []
 
     def start_turn(self):
         self.sense.update()
@@ -71,19 +75,36 @@ class BuilderBot(Bot):
         # Compute symmetry if time left
         # DEBUG: sensing
         # visualize.visualize_map_minimal(self.rc, self.sense)
+        print(self.state)
         self.state_turn_counter += 1
 
     # Econ Turns
     def econ_explore(self):
         # Check for ore
-        if self.sense.in_vision_nearest_ore is not None and \
-                not self.sense.get_building_type(self.sense.in_vision_nearest_ore) == EntityType.HARVESTER:
-           self.state_turn_counter = 0
-           self.state = BotState.ECON_TARGET
-           
-           self.explore_ore_target = self.sense.in_vision_nearest_ore
-           self.pathfind_target = self.sense.in_vision_nearest_ore
-           return
+        if self.should_connect_to_ore(self.sense.nearest_ore):
+            best_one_off = None
+            best_dist = float('inf')
+            for cd in CARDINAL_DIRECTIONS:
+                p = self.sense.nearest_ore.add(cd)
+                print('trying dir ', cd, end=' ')
+                if not self.rc.is_in_vision(p):
+                    continue
+                if not (self.sense.is_empty(p) or self.sense.get_building_type(p) == EntityType.ROAD):
+                    continue
+                dist = p.distance_squared(self.core_pos)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_one_off = cd
+
+            if best_one_off is None:
+                self.explore_blacklist.append(self.sense.nearest_ore)
+                return
+            
+            self.state_turn_counter = 0
+            self.state = BotState.ECON_TARGET
+            self.explore_ore_target = self.sense.nearest_ore
+            self.pathfind_target = self.sense.nearest_ore.add(best_one_off)
+            return
 
         # Actual Movement
         self.explore_timeout -= 1
@@ -101,45 +122,98 @@ class BuilderBot(Bot):
         elif self.rc.is_tile_empty(next_pos):
             if self.rc.can_build_road(next_pos):
                 self.rc.build_road(next_pos)
-                self.rc.move(self.explore_dir)
+                if self.rc.can_move(self.explore_dir):
+                    self.rc.move(self.explore_dir)
         else:
             self.explore_dir = biased_random_dir(self.rc)
+
 
     def econ_target(self):
         if self.sense.get_building_type(self.explore_ore_target) == EntityType.HARVESTER:
             self.state_turn_counter = 0
             self.state = BotState.ECON_EXPLORE
+            self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+            self.explore_timeout = EXPLORE_TIMEOUT
+            self.explore_ore_target = None
+            return
 
-        if not self.rc.get_position().distance_squared(self.explore_ore_target) == 0:
+            
+        if not is_adjacent(self.rc.get_position(), self.explore_ore_target):
             pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
         else:
             self.state_turn_counter = 0
             self.state = BotState.ECON_CONNECT
-    
-            # Replace with finding good spot nearest core
-            d1 = self.core_pos.direction_to(self.explore_ore_target)
-            p1 = self.core_pos.add(d1)
-            d2 = p1.direction_to(self.explore_ore_target)
-            p2 = self.core_pos.add(d2)
-            
-            self.explore_first_turn_flag = True
-            self.pathfind_target = p2
-            
-        pass
+            self.connect_current_target = None
+            self.connect_harvester_added = False
+            self.connect_current = []
+            self.pathfind_target = None
+        
     
     def econ_connect(self):
-        if self.state_turn_counter != 2:
-            if pathfind.cardinal_pathfind_to(self.rc, self.pathfind_target, False):
-                self.state_turn_counter = 0
-                self.state = BotState.ECON_EXPLORE
-        else:
+        
+        flag = False
+        if self.rc.get_current_round() == 152:
+            flag = True
+        if self.connect_harvester_added == False:
+            if flag: print(self.rc.get_id(), 'trying to check to place harvester ', self.explore_ore_target, end=': ', file=sys.stderr)
+            
+
+            bldg = self.rc.get_tile_building_id(self.explore_ore_target)
+            if bldg is not None:
+                entt = self.rc.get_entity_type(bldg)
+                # print('trace0', entt, end=';', file=sys.stderr)
+                match entt:
+                    case EntityType.HARVESTER:
+                        if self.rc.get_team(bldg) == self.rc.get_team():
+                            self.explore_blacklist.append(self.explore_ore_target)
+                            self.state_turn_counter = 0
+                            self.state = BotState.ECON_EXPLORE
+                            self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+                            self.explore_timeout = EXPLORE_TIMEOUT
+                            self.explore_ore_target = None
+                            return
+                        else:
+                            # print('FAILED (enemy harvester exists)', self.explore_ore_target, file=sys.stderr)
+                            return
+                    case EntityType.ROAD | EntityType.MARKER:
+                        # print('FAILED (road exists)', self.explore_ore_target, file=sys.stderr)
+                        if self.rc.can_destroy(self.explore_ore_target):
+                            self.rc.destroy(self.explore_ore_target)
+                    case _:
+                        # print('FAILED (', entt, ' exists)', self.explore_ore_target, file=sys.stderr)
+                        return
+
             if self.rc.can_build_harvester(self.explore_ore_target):
+                # print('placing harvester ', self.explore_ore_target, file=sys.stderr)
                 self.rc.build_harvester(self.explore_ore_target)
-        if self.state_turn_counter == 1:
-            # One away from ore
-            if self.rc.get_entity_type(self.rc.get_tile_building_id(self.explore_ore_target)) == EntityType.ROAD:
-                self.rc.destroy(self.explore_ore_target)
-        pass
+                self.connect_harvester_added = True
+            # else:
+                # print('couldnt place harvester at ', self.explore_ore_target, 'from ', self.rc.get_position())
+            return
+        
+        if self.connect_current_target is None or self.rc.get_position() == self.connect_current_target:
+            if self.sense.get_building_type(self.rc.get_position()) == EntityType.ROAD and self.rc.can_destroy(self.rc.get_position()):
+                self.rc.destroy(self.rc.get_position())
+                
+                (best_target, final_one) = self.compute_best_bridge_target()
+                if self.rc.can_build_bridge(self.rc.get_position(), best_target):
+                    self.rc.build_bridge(self.rc.get_position(), best_target)
+                    self.connect_current.append(self.rc.get_position())
+                else:
+                    # print('best_target=',best_target, file=sys.stderr)
+                    return
+                self.connect_current_target = best_target
+
+                if final_one:
+                    self.state_turn_counter = 0
+                    self.state = BotState.ECON_EXPLORE
+                    self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+                    self.explore_timeout = EXPLORE_TIMEOUT
+                    self.explore_ore_target = None
+                    return
+
+        else:
+            pathfind.fast_pathfind_to(self.rc, self.connect_current_target)
 
     def econ_ensure(self):
         pass
@@ -147,12 +221,125 @@ class BuilderBot(Bot):
     def def_core_defence(self):
         pass
 
+    def compute_best_bridge_target(self) -> (Position, bool):
+        rc = self.rc
+        start = rc.get_position()
+        core = self.core_pos
 
+        width, height = rc.get_map_width(), rc.get_map_height()
 
+        # --- collect core 3x3 tiles --- TODO probably cache
+        core_tiles = []
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                ct = Position(core.x + dx, core.y + dy)
+                if is_in_map(ct, width, height):
+                    core_tiles.append(ct)
 
-# TODO Move to helpers.py
-def biased_random_dir(rc: Controller) -> Direction:
-    c = random.randint(0, 10)
-    if c < 3:
-        return rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
-    return random.choice(DIRECTIONS)
+        # --- helper: distance to closest core tile ---
+        def dist_to_core(p):
+            best = float('inf')
+            for ct in core_tiles:
+                d = p.distance_squared(ct)
+                if d < best:
+                    best = d
+            return best
+
+        # --- 1. if any core tile is directly reachable, return it ---
+        best_core_tile = None
+        best_core_dist = float('inf')
+
+        for ct in core_tiles:
+            if start.distance_squared(ct) <= GameConstants.BRIDGE_TARGET_RADIUS_SQ:
+                if not rc.is_in_vision(ct):
+                    continue
+                if rc.get_tile_env(ct) == Environment.WALL:
+                    continue
+
+                d = start.distance_squared(ct)
+                if d < best_core_dist:
+                    best_core_dist = d
+                    best_core_tile = ct
+
+        if best_core_tile is not None:
+            return (best_core_tile, True)
+
+        # --- 2. reuse existing bridge/conveyor if possible ---
+        # best_bridge = None
+        # best_bridge_dist = float('inf')
+
+        # for dx in range(-3, 4):
+        #     for dy in range(-3, 4):
+        #         if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
+        #             continue
+
+        #         pos = Position(start.x + dx, start.y + dy)
+
+        #         if not is_in_map(pos, width, height):
+        #             continue
+        #         if not rc.is_in_vision(pos):
+        #             continue
+
+        #         building_id = rc.get_tile_building_id(pos)
+        #         if building_id is None:
+        #             continue
+        #         if rc.get_entity_type(building_id) != EntityType.BRIDGE:
+        #             continue
+        #         if self.connect_current.__contains__(pos):
+        #             continue
+
+        #         d = dist_to_core(pos)
+        #         if d < best_bridge_dist:
+        #             best_bridge_dist = d
+        #             best_bridge = pos
+
+        # if best_bridge is not None:
+        #     return (best_bridge, True)
+
+        # --- 3. pick best new bridge position ---
+        best = None
+        best_dist = float('inf')
+        build_finish = False
+
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
+                    continue
+
+                pos = Position(start.x + dx, start.y + dy)
+
+                if not is_in_map(pos, width, height):
+                    continue
+                if not rc.is_in_vision(pos):
+                    continue
+                
+                bldg = rc.get_tile_building_id(pos)
+                if rc.get_tile_env(pos) == Environment.WALL:
+                    continue
+                is_to_bridge = False
+                if bldg is not None:
+                    t = rc.get_entity_type(bldg)
+                    team = rc.get_team(bldg)
+                    if team != rc.get_team() or \
+                        not (t == EntityType.MARKER or t == EntityType.ROAD or t == EntityType.CONVEYOR or t == EntityType.BRIDGE):
+                        continue
+                    if t == EntityType.BRIDGE:
+                        is_to_bridge = True
+
+                d = dist_to_core(pos)
+
+                if d < best_dist:
+                    best_dist = d
+                    best = pos
+                    build_finish = is_to_bridge
+
+        return (best if best is not None else start, build_finish)
+    
+    def should_connect_to_ore(self, pos: Position):
+        ret = pos is not None
+        print(pos, '->', ret)
+        ret = ret and not self.sense.get_building_type(pos) == EntityType.HARVESTER
+        print(pos, '->', ret)
+        ret = ret and not self.explore_blacklist.__contains__(pos)
+        print(pos, '->', ret, self.explore_blacklist)
+        return ret
