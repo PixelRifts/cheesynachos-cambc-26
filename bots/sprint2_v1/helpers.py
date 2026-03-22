@@ -3,7 +3,7 @@ import math
 import random
 from cambc import Controller, Environment, Position, Direction, EntityType
 
-RANDOM_SEED = 1234
+RANDOM_SEED = 14
 
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height

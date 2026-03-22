@@ -38,14 +38,6 @@ class BuilderBot(Bot):
         self.job = BotJob.ECONOMY
         self.state_turn_counter = 0
 
-        # Sometimes we check defence 1 in three
-        job_number = random.randint(0, 3)
-        print(job_number)
-        if job_number == 0:
-            self.state = BotState.DEF_CORE_DEFENCE
-        else :
-            self.state = BotState.ECON_EXPLORE
-
         self.sense = sense.Sense(rc)
         self.pathfind_target = None
         
@@ -56,6 +48,11 @@ class BuilderBot(Bot):
                 self.core_pos = rc.get_position(b)
                 break
         
+        if self.core_pos == self.rc.get_position():
+            self.state = BotState.DEF_CORE_DEFENCE
+        else:
+            self.state = BotState.ECON_EXPLORE
+            
         # TODO assuming rotational symmetry here, but work on changing that
         self.enemy_core_pos = get_rotationally_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height())
         
@@ -100,7 +97,8 @@ class BuilderBot(Bot):
         # Compute symmetry if time left
         # DEBUG: sensing
         # visualize.visualize_map_minimal(self.rc, self.sense)
-        print(self.state)
+        print(self.state, self.pathfind_target)
+        if self.pathfind_target is not None: self.rc.draw_indicator_line(self.rc.get_position(), self.pathfind_target, 10, 80, 230)
         self.state_turn_counter += 1
 
     # Econ Turns
@@ -287,14 +285,24 @@ class BuilderBot(Bot):
     def def_goto_enemy(self):
         pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
         if self.rc.get_position().distance_squared(self.enemy_core_pos) < GameConstants.BUILDER_BOT_VISION_RADIUS_SQ:
-            (pos, replace) = self.compute_best_hijack_target()
-            if pos is not None:
+            if self.sense.get_building_type(self.enemy_core_pos) == EntityType.CORE:
+                (pos, replace) = self.compute_best_hijack_target()
+                if pos is not None:
+                    self.state_turn_counter = 0
+                    if replace:
+                        self.state = BotState.DEF_HIJACK_RESOURCE
+                    else:
+                        self.state = BotState.DEF_MARK_RESOURCE
+                    self.pathfind_target = pos
+            else:
                 self.state_turn_counter = 0
-                if replace:
-                    self.state = BotState.DEF_HIJACK_RESOURCE
-                else:
-                    self.state = BotState.DEF_MARK_RESOURCE
-                self.pathfind_target = pos
+                self.state = BotState.ECON_EXPLORE
+                self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+                self.explore_timeout = EXPLORE_TIMEOUT
+                self.explore_ore_target = None
+                return
+
+
 
     def def_mark_resource(self):
         entities = self.rc.get_nearby_entities()
@@ -318,9 +326,8 @@ class BuilderBot(Bot):
         
         if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
             if entity_neighbour_exists is not None:
-                print(self.rc.get_id(), 'destrying self because of', e, file=sys.stderr)
+                print(self.rc.get_id(), 'destroying self because of', e, file=sys.stderr)
                 self.rc.self_destruct()
-        pass
 
     def def_hijack_resource(self):
         if not is_adjacent_with_diag(self.rc.get_position(), self.pathfind_target):
@@ -366,7 +373,7 @@ class BuilderBot(Bot):
                     valid_tiles.append(p)
                     if not self.rc.is_in_vision(p): continue
                     dist = p.distance_squared(self.enemy_core_pos)
-                    if not (self.rc.is_empty(p) or self.rc.is_tile_passable(p)): continue
+                    if not (self.rc.is_tile_empty(p) or self.rc.is_tile_passable(p)): continue
                     
                     if dist < best_dist:
                         best_dist = dist
@@ -514,5 +521,17 @@ class BuilderBot(Bot):
             bldg = self.rc.get_tile_building_id(pos)
             if self.rc.get_team(bldg) == self.rc.get_team():
                 return False
+            else:
+                has_free_side = False
+                for d in CARDINAL_DIRECTIONS:
+                    p = pos.add(d)
+                    if not self.rc.is_in_vision(p): continue
+                    if self.rc.is_tile_empty(p) or \
+                        (self.sense.is_friendly_building(p) and self.sense.get_building_type(p) == EntityType.ROAD):
+                        has_free_side = True
+                        break
+                
+                if has_free_side: print('siphoning resources from ', pos, file=sys.stderr)
+                return has_free_side
         
         return True
