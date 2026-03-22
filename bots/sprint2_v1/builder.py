@@ -122,7 +122,7 @@ class BuilderBot(Bot):
                     best_one_off = cd
 
             if best_one_off is None:
-                if tested != 4: self.explore_blacklist.append(self.sense.nearest_ore)
+                if tested == 4: self.explore_blacklist.append(self.sense.nearest_ore)
                 return
             
             self.state_turn_counter = 0
@@ -186,7 +186,6 @@ class BuilderBot(Bot):
         if self.connect_harvester_added == False:
             # print(self.rc.get_id(), 'trying to check to place harvester ', self.explore_ore_target, end=': ', file=sys.stderr)
             
-
             bldg = self.rc.get_tile_building_id(self.explore_ore_target)
             if bldg is not None:
                 entt = self.rc.get_entity_type(bldg)
@@ -284,8 +283,10 @@ class BuilderBot(Bot):
 
     def def_goto_enemy(self):
         pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
-        if self.rc.get_position().distance_squared(self.enemy_core_pos) < GameConstants.BUILDER_BOT_VISION_RADIUS_SQ:
-            if self.sense.get_building_type(self.enemy_core_pos) == EntityType.CORE:
+        if self.rc.is_in_vision(self.enemy_core_pos):
+            bldg = self.rc.get_tile_building_id(self.enemy_core_pos)
+            entt = self.rc.get_entity_type(bldg)
+            if entt == EntityType.CORE:
                 (pos, replace) = self.compute_best_hijack_target()
                 if pos is not None:
                     self.state_turn_counter = 0
@@ -295,6 +296,7 @@ class BuilderBot(Bot):
                         self.state = BotState.DEF_MARK_RESOURCE
                     self.pathfind_target = pos
             else:
+                print(self.enemy_core_pos, 'is not the enemy core')
                 self.state_turn_counter = 0
                 self.state = BotState.ECON_EXPLORE
                 self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
