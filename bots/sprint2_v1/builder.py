@@ -4,7 +4,7 @@ import random
 
 import sense
 import visualize
-from helpers import is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, get_rotationally_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
+from helpers import is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
 
 from enum import Enum
 from bot import Bot
@@ -12,6 +12,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 
 EXPLORE_TIMEOUT = 16
 NUKE_WAIT_FOR = 500 # Wait 600 turns before starting to nuke
+CORE_DANGER_RANGE = 64 # 8 Tiles away are insta nuked
 
 class BotJob(Enum):
     ECONOMY = "Economy"
@@ -37,6 +38,7 @@ class BuilderBot(Bot):
         super().__init__(rc)
         self.job = BotJob.ECONOMY
         self.state_turn_counter = 0
+        self.center_pos = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
 
         self.sense = sense.Sense(rc)
         self.pathfind_target = None
@@ -54,9 +56,9 @@ class BuilderBot(Bot):
             self.state = BotState.ECON_EXPLORE
             
         # TODO assuming rotational symmetry here, but work on changing that
-        self.enemy_core_pos = get_rotationally_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height())
+        self.enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), guess_symmetry(self.rc.get_map_width(), self.rc.get_map_height()))
         
-        self.explore_dir = self.core_pos.direction_to(rc.get_position())
+        self.explore_dir = rc.get_position().direction_to(self.center_pos)
         self.explore_timeout = EXPLORE_TIMEOUT
         self.explore_ore_target = None
         self.explore_blacklist = []
@@ -133,8 +135,8 @@ class BuilderBot(Bot):
 
         if self.sense.nearest_enemy_infra is not None:
             # TODO Check nukability
-            test = random.randint(0, 10)
-            if self.rc.get_current_round() > NUKE_WAIT_FOR and test <= 4:
+            core_dist = self.sense.nearest_enemy_infra.distance_squared(self.core_pos)
+            if self.rc.get_current_round() > NUKE_WAIT_FOR or core_dist < CORE_DANGER_RANGE:
                 self.state_turn_counter = 0
                 self.state = BotState.ECON_NUKE
                 self.pathfind_target = self.sense.nearest_enemy_infra
@@ -250,36 +252,86 @@ class BuilderBot(Bot):
         if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
             self.rc.self_destruct()
 
+        # splitter_edges = [
+        #     (self.core_pos.add(Direction.EAST) .add(Direction.NORTHEAST), Direction.WEST),
+        #     (self.core_pos.add(Direction.EAST) .add(Direction.SOUTHEAST), Direction.WEST),
+        #     (self.core_pos.add(Direction.WEST) .add(Direction.NORTHWEST), Direction.EAST),
+        #     (self.core_pos.add(Direction.WEST) .add(Direction.SOUTHWEST), Direction.EAST),
+        #     (self.core_pos.add(Direction.NORTH).add(Direction.NORTHEAST), Direction.SOUTH),
+        #     (self.core_pos.add(Direction.NORTH).add(Direction.NORTHWEST), Direction.SOUTH),
+        #     (self.core_pos.add(Direction.SOUTH).add(Direction.SOUTHEAST), Direction.NORTH),
+        #     (self.core_pos.add(Direction.SOUTH).add(Direction.SOUTHWEST), Direction.NORTH),
+        # ]
     def def_core_defence(self):
-        corners = [
-            self.core_pos.add(Direction.NORTHEAST).add(Direction.NORTHEAST),
-            self.core_pos.add(Direction.NORTHWEST).add(Direction.NORTHWEST),
-            self.core_pos.add(Direction.SOUTHEAST).add(Direction.SOUTHEAST),
-            self.core_pos.add(Direction.SOUTHWEST).add(Direction.SOUTHWEST)
-        ]
-
+        
         current_pos = self.rc.get_position()
-        for cor in corners:
-            self.rc.draw_indicator_dot(cor, 0, 0, 255)
+        # print(self.get_defence_plan())
+        
+        for dx, dy, desired_type, dir in self.get_defence_plan():
+            target = Position(self.core_pos.x + dx, self.core_pos.y + dy)
 
-        target_corner = None
-        for corner in corners:
-            if self.rc.is_in_vision(corner):
-                if self.rc.get_tile_building_id(corner) is None:
-                    target_corner = corner
-                    break
+            if not is_in_map(target, self.rc.get_map_width(), self.rc.get_map_height()): continue
+            if not self.rc.is_in_vision(target): continue
+            bldg_id = self.rc.get_tile_building_id(target)
 
-        self.rc.draw_indicator_dot(cor, 255, 0, 0)
-        if target_corner:
-            if self.rc.can_build_launcher(target_corner):
-                self.rc.build_launcher(target_corner)
-            elif current_pos != target_corner:
-                pathfind.fast_pathfind_to(self.rc, target_corner)
-        else:
+            valid = (
+                bldg_id is not None and \
+                self.rc.get_team(bldg_id) == self.rc.get_team() and \
+                self.rc.get_entity_type(bldg_id) == desired_type
+            )
+            if valid: continue
+            self.rc.draw_indicator_dot(target, 255, 0, 0)
+            
+            if not self.rc.is_tile_empty(target):
+                if self.rc.can_destroy(target):
+                    self.rc.destroy(target)
+            
+            if desired_type == EntityType.LAUNCHER:
+                # print('launcher????', file=sys.stderr)
+                if self.rc.can_build_launcher(target):
+                    self.rc.build_launcher(target)
+                    return
+            elif desired_type == EntityType.SPLITTER:
+                # print('splitter????', file=sys.stderr)
+                if self.rc.can_build_splitter(target, dir):
+                    self.rc.build_splitter(target, dir)
+            elif desired_type == EntityType.FOUNDRY:
+                # print('splitter????', file=sys.stderr)
+                if self.rc.can_build_foundry(target):
+                    self.rc.build_foundry(target)
+
+            if not is_adjacent_with_diag(current_pos, target):
+                pathfind.fast_pathfind_to(self.rc, target)
+                return
+
+        if self.rc.get_current_round() > 200:
             self.state_turn_counter = 0
             self.state = BotState.DEF_GOTO_ENEMY
             self.pathfind_target = self.enemy_core_pos
-            return
+        else:
+            self.state_turn_counter = 0
+            self.state = BotState.ECON_EXPLORE
+            self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+            self.explore_timeout = EXPLORE_TIMEOUT
+            self.explore_ore_target = None
+
+
+    def get_defence_plan(self):
+        plan = []
+        (ti, ax) = self.rc.get_global_resources()
+        if self.rc.get_current_round() > 30 and ti > 500:
+            plan.extend([
+                # (2, 2, EntityType.LAUNCHER, Direction.CENTRE),
+                # (-2, 2, EntityType.LAUNCHER, Direction.CENTRE),
+                # (2, -2, EntityType.LAUNCHER, Direction.CENTRE),
+                # (-2, -2, EntityType.LAUNCHER, Direction.CENTRE),
+                ( 1,  2, EntityType.SPLITTER, Direction.NORTH),
+                (-1,  2, EntityType.SPLITTER, Direction.NORTH),
+                ( 0,  2, EntityType.FOUNDRY, Direction.CENTRE)
+                # ( 1, -2, EntityType.SPLITTER, Direction.SOUTH),
+                # (-1, -2, EntityType.SPLITTER, Direction.SOUTH),
+            ])
+        return plan
 
     def def_goto_enemy(self):
         pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
@@ -414,6 +466,12 @@ class BuilderBot(Bot):
                 ct = Position(core.x + dx, core.y + dy)
                 if is_in_map(ct, width, height):
                     core_tiles.append(ct)
+        plan = self.get_defence_plan()
+        for dx, dy, entity_type, dir in plan:
+            if entity_type == EntityType.SPLITTER:
+                pos = Position(core.x + dx, core.y + dy)
+                if is_in_map(pos, width, height):
+                    core_tiles.append(pos)
 
         # --- helper: distance to closest core tile ---
         def dist_to_core(p):
@@ -500,9 +558,9 @@ class BuilderBot(Bot):
                     t = rc.get_entity_type(bldg)
                     team = rc.get_team(bldg)
                     if team != rc.get_team() or \
-                        not (t == EntityType.MARKER or t == EntityType.ROAD or t == EntityType.CONVEYOR or t == EntityType.BRIDGE):
+                        not (t == EntityType.MARKER or t == EntityType.ROAD or t == EntityType.SPLITTER or t == EntityType.CONVEYOR or t == EntityType.BRIDGE):
                         continue
-                    if t == EntityType.BRIDGE:
+                    if t == EntityType.BRIDGE or t == EntityType.SPLITTER:
                         is_to_bridge = True
 
                 d = dist_to_core(pos)

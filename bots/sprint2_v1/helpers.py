@@ -1,6 +1,7 @@
 import sys
 import math
 import random
+from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
 
 RANDOM_SEED = 14
@@ -56,5 +57,19 @@ def is_adjacent_with_diag(a: Position, b: Position, debug: bool = False) -> bool
     if debug: print(dx, dy, dx + dy == 1, file=sys.stderr)
     return dx <= 1 and dy <= 1
 
-def get_rotationally_symmetric(pos: Position, width: int, height: int) -> Position:
-    return Position(width - 1 - pos.x, height - 1 - pos.y)
+class Symmetry(Enum):
+    ROTATIONAL = 'rotational'
+    VERTICAL = 'vertical'
+    HORIZONTAL = 'horizontal'
+
+def guess_symmetry(width: int, height: int) -> Symmetry:
+    if width > height: return Symmetry.HORIZONTAL
+    elif height > width: return Symmetry.VERTICAL
+    return Symmetry.ROTATIONAL
+
+def get_symmetric(pos: Position, width: int, height: int, sym: Symmetry) -> Position:
+    match sym:
+        case Symmetry.ROTATIONAL: return Position(width - 1 - pos.x, height - 1 - pos.y)
+        case Symmetry.VERTICAL:   return Position(pos.x,             height - 1 - pos.y)
+        case Symmetry.HORIZONTAL: return Position(width - 1 - pos.x, pos.y             )
+    assert False

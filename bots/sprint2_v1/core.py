@@ -18,8 +18,8 @@ class Core(Bot):
     def turn(self):
         (ti, ax) = self.rc.get_global_resources()
 
-        if (self.rc.get_current_round() % 100 == 50) and (ti > self.rc.get_builder_bot_cost()[0]*6):
-            self.burst_attack = 6
+        if (self.rc.get_current_round() % 100 == 50) and (ti > self.rc.get_builder_bot_cost()[0]*8):
+            self.burst_attack = 4
 
         if self.burst_attack > 0:
             spawn_pos = self.rc.get_position()
@@ -34,10 +34,11 @@ class Core(Bot):
             elif self.rc.get_current_round() > 500:
                 threshold = 4 + self.rc.get_current_round() // 25
             else:
-                threshold = 4 + self.rc.get_current_round() // 50
+                threshold = 4 + self.rc.get_current_round() // 45
             
             if self.count < threshold:
                 spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
+                if self.rc.get_current_round() < 200: spawn_pos = self.rc.get_position()
                 if self.rc.can_spawn(spawn_pos):
                     self.rc.spawn_builder(spawn_pos)
                     self.count += 1
