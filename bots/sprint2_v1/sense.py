@@ -101,9 +101,9 @@ class Sense:
         elif env == Environment.ORE_AXIONITE:
             self._grid[pos.y][pos.x] = 3
             # Mark nearest Ore
-            if dist < self.nearest_ore_dist:
-                self.nearest_ore_dist = dist
-                self.nearest_ore = pos
+            # if dist < self.nearest_ore_dist:
+            #     self.nearest_ore_dist = dist
+            #     self.nearest_ore = pos
         elif env == Environment.EMPTY:
             self._grid[pos.y][pos.x] = 0
     

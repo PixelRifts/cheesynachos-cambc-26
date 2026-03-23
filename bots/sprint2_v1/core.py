@@ -28,13 +28,7 @@ class Core(Bot):
                 self.burst_attack -= 1
         else:
             # spawn_to_threshold
-            threshold = self.rc.get_current_round() // 50
-            if self.rc.get_current_round() > 1500:
-                threshold = 4 + self.rc.get_current_round() // 10
-            elif self.rc.get_current_round() > 500:
-                threshold = 4 + self.rc.get_current_round() // 25
-            else:
-                threshold = 4 + self.rc.get_current_round() // 45
+            threshold = 4 + (self.rc.get_current_round() // 30)+1
             
             if self.count < threshold:
                 spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))

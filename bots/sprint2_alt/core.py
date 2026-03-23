@@ -14,7 +14,7 @@ class Core(Bot):
         pass
 
     def turn(self):
-        if self.count < 1:
+        if self.count < 4 + self.rc.get_current_round() // 55:
             spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
             if self.rc.can_spawn(spawn_pos):
                 self.rc.spawn_builder(spawn_pos)

@@ -1,6 +1,8 @@
 import sys
 import math
 import random
+
+from typing import Optional
 from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
 
@@ -17,12 +19,24 @@ DIRECTIONS_ORDERED = [
     Direction.SOUTH, Direction.SOUTHWEST, Direction.WEST, Direction.NORTHWEST
 ]
 
+DIRECTIONS_ORDERED_CARDINALS_FIRST = [
+    Direction.NORTH, Direction.EAST,
+    Direction.SOUTH, Direction.WEST,
+    Direction.NORTHEAST, Direction.SOUTHEAST,
+    Direction.SOUTHWEST, Direction.NORTHWEST,
+]
+
 DIRECTIONS_INDEX = {d: i for i, d in enumerate(DIRECTIONS_ORDERED)}
 
 # Major Helpers
 
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
+
+def get_building_type(rc: Controller, p: Position) -> Optional[EntityType]:
+    bldg = rc.get_tile_building_id(p)
+    if bldg is None: return None
+    return rc.get_entity_type(bldg)
 
 # Direction Helpers
 
@@ -56,15 +70,33 @@ def biased_random_dir(rc: Controller) -> Direction:
 
 # Pathfind
 
+def is_friendly_transport(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return False
+    entt = rc.get_entity_type(bldg)
+    return entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE
+
 def is_pos_pathable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos) or rc.is_tile_passable(pos): return True
     env = rc.get_tile_env(pos)
     if env == Environment.WALL: return False
     
     bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return True
     entt = rc.get_entity_type(bldg)
     allied = rc.get_team() == rc.get_team(bldg)
     return is_entt_pathable(entt, allied)
+
+def is_pos_editable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return True
+    allied = rc.get_team() == rc.get_team(bldg)
+    return allied
 
 def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
     if entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE or entt == EntityType.ROAD or entt == EntityType.MARKER:
@@ -88,6 +120,11 @@ def is_adjacent_with_diag(a: Position, b: Position, debug: bool = False) -> bool
     dy = abs(a.y - b.y)
     if debug: print(dx, dy, dx + dy == 1, file=sys.stderr)
     return dx <= 1 and dy <= 1
+
+def manhattan_distance(a: Position, b: Position) -> int:
+    dx = abs(a.x - b.x)
+    dy = abs(a.y - b.y)
+    return dx + dy
 
 # Symmetry
 

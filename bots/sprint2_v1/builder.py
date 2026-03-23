@@ -133,13 +133,13 @@ class BuilderBot(Bot):
             self.pathfind_target = self.sense.nearest_ore.add(best_one_off)
             return
 
-        if self.sense.nearest_enemy_infra is not None:
-            # TODO Check nukability
-            core_dist = self.sense.nearest_enemy_infra.distance_squared(self.core_pos)
-            if self.rc.get_current_round() > NUKE_WAIT_FOR or core_dist < CORE_DANGER_RANGE:
-                self.state_turn_counter = 0
-                self.state = BotState.ECON_NUKE
-                self.pathfind_target = self.sense.nearest_enemy_infra
+        # if self.sense.nearest_enemy_infra is not None:
+        #     # TODO Check nukability
+        #     core_dist = self.sense.nearest_enemy_infra.distance_squared(self.core_pos)
+        #     if self.rc.get_current_round() > NUKE_WAIT_FOR or core_dist < CORE_DANGER_RANGE:
+        #         self.state_turn_counter = 0
+        #         self.state = BotState.ECON_NUKE
+        #         self.pathfind_target = self.sense.nearest_enemy_infra
 
         # Actual Movement
         self.explore_timeout -= 1
@@ -148,7 +148,7 @@ class BuilderBot(Bot):
             self.explore_dir = biased_random_dir(self.rc)
             
         next_pos = self.rc.get_position().add(self.explore_dir)
-        if not pathfind.is_in_map(next_pos, self.rc.get_map_width(), self.rc.get_map_height()):
+        if not is_in_map(next_pos, self.rc.get_map_width(), self.rc.get_map_height()):
             self.explore_dir = biased_random_dir(self.rc)
             return
 
@@ -304,16 +304,16 @@ class BuilderBot(Bot):
                 pathfind.fast_pathfind_to(self.rc, target)
                 return
 
-        if self.rc.get_current_round() > 200:
-            self.state_turn_counter = 0
-            self.state = BotState.DEF_GOTO_ENEMY
-            self.pathfind_target = self.enemy_core_pos
-        else:
-            self.state_turn_counter = 0
-            self.state = BotState.ECON_EXPLORE
-            self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
-            self.explore_timeout = EXPLORE_TIMEOUT
-            self.explore_ore_target = None
+        # if self.rc.get_current_round() > 200:
+        #     self.state_turn_counter = 0
+        #     self.state = BotState.DEF_GOTO_ENEMY
+        #     self.pathfind_target = self.enemy_core_pos
+        # else:
+        self.state_turn_counter = 0
+        self.state = BotState.ECON_EXPLORE
+        self.explore_dir = self.core_pos.direction_to(self.rc.get_position())
+        self.explore_timeout = EXPLORE_TIMEOUT
+        self.explore_ore_target = None
 
 
     def get_defence_plan(self):
@@ -502,36 +502,36 @@ class BuilderBot(Bot):
             return (best_core_tile, True)
 
         # --- 2. reuse existing bridge/conveyor if possible ---
-        # best_bridge = None
-        # best_bridge_dist = float('inf')
+        best_bridge = None
+        best_bridge_dist = float('inf')
 
-        # for dx in range(-3, 4):
-        #     for dy in range(-3, 4):
-        #         if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
-        #             continue
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
+                    continue
 
-        #         pos = Position(start.x + dx, start.y + dy)
+                pos = Position(start.x + dx, start.y + dy)
 
-        #         if not is_in_map(pos, width, height):
-        #             continue
-        #         if not rc.is_in_vision(pos):
-        #             continue
+                if not is_in_map(pos, width, height):
+                    continue
+                if not rc.is_in_vision(pos):
+                    continue
 
-        #         building_id = rc.get_tile_building_id(pos)
-        #         if building_id is None:
-        #             continue
-        #         if rc.get_entity_type(building_id) != EntityType.BRIDGE:
-        #             continue
-        #         if self.connect_current.__contains__(pos):
-        #             continue
+                building_id = rc.get_tile_building_id(pos)
+                if building_id is None:
+                    continue
+                if rc.get_entity_type(building_id) != EntityType.BRIDGE:
+                    continue
+                if self.connect_current.__contains__(pos):
+                    continue
 
-        #         d = dist_to_core(pos)
-        #         if d < best_bridge_dist:
-        #             best_bridge_dist = d
-        #             best_bridge = pos
+                d = dist_to_core(pos)
+                if d < best_bridge_dist:
+                    best_bridge_dist = d
+                    best_bridge = pos
 
-        # if best_bridge is not None:
-        #     return (best_bridge, True)
+        if best_bridge is not None:
+            return (best_bridge, True)
 
         # --- 3. pick best new bridge position ---
         best = None
