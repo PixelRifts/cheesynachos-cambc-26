@@ -65,7 +65,6 @@ class BuilderBot(Bot):
     
     def econ_explore(self):
         # Defence Plan Guarantee
-        plan = self.get_defence_plan()
         if not self.verify_defences():
             return
 
@@ -150,8 +149,10 @@ class BuilderBot(Bot):
             
         else:
             bldg = self.rc.get_tile_building_id(self.rc.get_position())
+            entt = get_building_type(self.rc, self.rc.get_position())
             allied = self.rc.get_team(bldg) == self.rc.get_team()
-            if allied and (get_building_type(self.rc, self.rc.get_position()) == EntityType.ROAD or get_building_type(self.rc, self.rc.get_position()) == EntityType.CONVEYOR):
+            already_connected = False
+            if allied and (entt == EntityType.ROAD or entt == EntityType.CONVEYOR or entt == EntityType.BRIDGE):
                 self.rc.destroy(self.rc.get_position())
             elif not allied:
                 if self.rc.can_fire(self.rc.get_position()):
@@ -195,15 +196,15 @@ class BuilderBot(Bot):
             # (-2, 2, EntityType.LAUNCHER, Direction.CENTRE),
             # (2, -2, EntityType.LAUNCHER, Direction.CENTRE),
             # (-2, -2, EntityType.LAUNCHER, Direction.CENTRE),
-            # ( 1,  2, EntityType.SPLITTER, Direction.NORTH),
-            (-1,  2, EntityType.SPLITTER, Direction.NORTH),
+            (2,  1, EntityType.SPLITTER, Direction.WEST),
+            (2, -1, EntityType.SPLITTER, Direction.WEST),
             # ( 0,  2, EntityType.FOUNDRY, Direction.CENTRE)
-            # ( 1, -2, EntityType.SPLITTER, Direction.SOUTH),
-            # (-1, -2, EntityType.SPLITTER, Direction.SOUTH),
+            # (-2,  1, EntityType.SPLITTER, Direction.EAST),
+            # (-2, -1, EntityType.SPLITTER, Direction.EAST),
         ]
         
         (ti, ax) = self.rc.get_global_resources()
-        if self.rc.get_current_round() > 30 and ti > 500:
+        if self.rc.get_current_round() > 100 and ti > 500:
             plan.extend([
                 # (2, 2, EntityType.LAUNCHER, Direction.CENTRE),
                 # (-2, 2, EntityType.LAUNCHER, Direction.CENTRE),
@@ -211,7 +212,8 @@ class BuilderBot(Bot):
                 # (-2, -2, EntityType.LAUNCHER, Direction.CENTRE),
                 # ( 1,  2, EntityType.SPLITTER, Direction.NORTH),
                 # (-1,  2, EntityType.SPLITTER, Direction.NORTH),
-                ( 0,  2, EntityType.FOUNDRY, Direction.CENTRE)
+                ( 2,  0, EntityType.FOUNDRY, Direction.CENTRE),
+                # (-2,  0, EntityType.FOUNDRY, Direction.CENTRE),
                 # ( 1, -2, EntityType.SPLITTER, Direction.SOUTH),
                 # (-1, -2, EntityType.SPLITTER, Direction.SOUTH),
             ])
@@ -225,6 +227,9 @@ class BuilderBot(Bot):
 
             if not is_in_map(target, self.rc.get_map_width(), self.rc.get_map_height()): continue
             if not self.rc.is_in_vision(target): continue
+            env = self.rc.get_tile_env(target)
+            if env == Environment.WALL: continue
+
             bldg_id = self.rc.get_tile_building_id(target)
 
             valid = (
@@ -289,14 +294,15 @@ class BuilderBot(Bot):
         core_foundry_tiles = []
         plan = self.get_defence_plan()
         for dx, dy, entity_type, dir in plan:
+            pos = Position(core.x + dx, core.y + dy)
+            if not is_in_map(pos, width, height): continue
+            if not self.rc.is_in_vision(pos): continue
+            env = self.rc.get_tile_env(pos)
+            if env == Environment.WALL: continue
             if entity_type == EntityType.SPLITTER:
-                pos = Position(core.x + dx, core.y + dy)
-                if is_in_map(pos, width, height):
-                    core_splitter_tiles.append(pos)
+                core_splitter_tiles.append(pos)
             elif entity_type == EntityType.FOUNDRY:
-                pos = Position(core.x + dx, core.y + dy)
-                if is_in_map(pos, width, height):
-                    core_foundry_tiles.append(pos)
+                core_foundry_tiles.append(pos)
 
         # --- helper: distance to closest core tile ---
         def dist_to_core(p):
@@ -350,7 +356,7 @@ class BuilderBot(Bot):
                         best_core_dist = d
                         best_core_tile = ct
             if best_core_tile is not None:
-                print('track1')
+                print('track1', best_core_tile)
                 return (best_core_tile, True, True)
 
             for ct in core_tiles:
@@ -368,43 +374,45 @@ class BuilderBot(Bot):
                 print('track2')
                 return (best_core_tile, True, True)
 
-        # --- 2. reuse existing bridge/conveyor/splitter if possible ---
-        best_bridge = None
-        best_bridge_dist = float('inf')
+        # --- 2. reuse existing bridge/conveyor/splitter if it's necessary to be conservative ---
+        # (ti, ax) = rc.get_global_resources()
+        # if ti - (GameConstants.BRIDGE_BASE_COST[0] * rc.get_scale_percent()) < 50:
+        #     best_bridge = None
+        #     best_bridge_dist = float('inf')
+            
+        #     for dx in range(-3, 4):
+        #         for dy in range(-3, 4):
+        #             if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
+        #                 continue
 
-        for dx in range(-3, 4):
-            for dy in range(-3, 4):
-                if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
-                    continue
+        #             pos = Position(start.x + dx, start.y + dy)
 
-                pos = Position(start.x + dx, start.y + dy)
+        #             if not is_in_map(pos, width, height):
+        #                 continue
+        #             if not rc.is_in_vision(pos):
+        #                 continue
 
-                if not is_in_map(pos, width, height):
-                    continue
-                if not rc.is_in_vision(pos):
-                    continue
+        #             building_id = rc.get_tile_building_id(pos)
+        #             if building_id is None: continue
+        #             if rc.get_team(building_id) != rc.get_team(): continue
 
-                building_id = rc.get_tile_building_id(pos)
-                if building_id is None: continue
-                if rc.get_team(building_id) != rc.get_team(): continue
+        #             if rc.get_entity_type(building_id) != EntityType.BRIDGE and rc.get_entity_type(building_id) != EntityType.CONVEYOR and rc.get_entity_type(building_id) != EntityType.SPLITTER:
+        #                 continue
+        #             if self.connect_current_run.__contains__(pos):
+        #                 continue
+                    
+        #             testing_resource = ResourceType.RAW_AXIONITE if connecting_ax else ResourceType.TITANIUM
+        #             if rc.get_stored_resource(building_id) != testing_resource:
+        #                 continue
 
-                if rc.get_entity_type(building_id) != EntityType.BRIDGE and rc.get_entity_type(building_id) != EntityType.CONVEYOR  and rc.get_entity_type(building_id) != EntityType.SPLITTER:
-                    continue
-                if self.connect_current_run.__contains__(pos):
-                    continue
-                
-                testing_resource = ResourceType.RAW_AXIONITE if connecting_ax else ResourceType.TITANIUM
-                if rc.get_stored_resource(building_id) != testing_resource:
-                    continue
+        #             d = dist_to_core(pos)
+        #             if d < best_bridge_dist and self_to_core_dist > d:
+        #                 best_bridge_dist = d
+        #                 best_bridge = pos
 
-                d = dist_to_core(pos)
-                if d < best_bridge_dist and self_to_core_dist > d:
-                    best_bridge_dist = d
-                    best_bridge = pos
-
-        if best_bridge is not None:
-            print('track3', best_bridge)
-            return (best_bridge, True, False)
+        #     if best_bridge is not None:
+        #         print('track3', best_bridge_dist, self_to_core_dist)
+        #         return (best_bridge, True, False)
 
         # --- 3. pick best new bridge position ---
         best = None
@@ -421,12 +429,18 @@ class BuilderBot(Bot):
                     continue
                 if not rc.is_in_vision(pos):
                     continue
-                
-                bldg = rc.get_tile_building_id(pos)
                 if rc.get_tile_env(pos) == Environment.WALL:
                     continue
+
+                bldg = rc.get_tile_building_id(pos)
                 if bldg is not None:
-                    continue
+                    entt = rc.get_entity_type(bldg)
+                    if rc.get_team(bldg) != rc.get_team():
+                        continue
+                    if entt != EntityType.ROAD and entt != EntityType.BRIDGE and entt != EntityType.CONVEYOR and entt != EntityType.SPLITTER:
+                        continue
+                    if self.connect_current_run.__contains__(pos):
+                        continue
 
                 d = dist_to_core(pos)
                 
@@ -435,7 +449,7 @@ class BuilderBot(Bot):
                     best = pos
                     # build_finish = is_to_bridge
 
-        print('track4')
+        print('track4', best if best is not None else start)
         return (best if best is not None else start, False, False)
     
 
@@ -446,11 +460,11 @@ class BuilderBot(Bot):
         if is_ax and ti < 300: return (False, Direction.CENTRE)
         if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
         
-        bldg = self.rc.get_tile_building_id(pos)
         has_free_side = False
         already_siphoned = False
         # not_enough_info = False
         
+        has_harvester = get_building_type(self.rc, pos)
         # if bldg is None or (self.rc.get_entity_type(bldg) == EntityType.HARVESTER):
         for d in CARDINAL_DIRECTIONS:
             p = pos.add(d)
@@ -467,5 +481,7 @@ class BuilderBot(Bot):
             if self.rc.is_tile_empty(p) or is_pos_editable(self.rc, p):
                 has_free_side = True
         
+        already_siphoned = already_siphoned and has_harvester
+
         return (has_free_side and not already_siphoned, get_best_empty_adj(self.rc, pos, self.core_pos))
         # return (False, Direction.CENTRE)
