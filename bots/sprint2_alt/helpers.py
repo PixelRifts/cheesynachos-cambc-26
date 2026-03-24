@@ -71,11 +71,12 @@ def biased_random_dir(rc: Controller) -> Direction:
 # Pathfind
 
 def is_friendly_transport(rc: Controller, pos: Position) -> bool:
-    if rc.is_tile_empty(pos): return True
+    if rc.is_tile_empty(pos): return False
     bldg = rc.get_tile_building_id(pos)
     if bldg is None: return False
+    allied = rc.get_team(bldg) == rc.get_team()
     entt = rc.get_entity_type(bldg)
-    return entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE
+    return allied and (entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE)
 
 def is_pos_pathable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos) or rc.is_tile_passable(pos): return True
@@ -106,7 +107,6 @@ def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
             return True
     return False
 
-
 # Adjacency Checks
 
 def is_adjacent(a: Position, b: Position, debug: bool = False) -> bool:
@@ -125,6 +125,29 @@ def manhattan_distance(a: Position, b: Position) -> int:
     dx = abs(a.x - b.x)
     dy = abs(a.y - b.y)
     return dx + dy
+
+def get_empty_adj(rc: Controller, a: Position) -> Direction:
+    for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if is_pos_pathable(rc, p): return d
+    return Direction.CENTRE
+
+def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not is_pos_pathable(rc, p): continue
+        dist = p.distance_squared(b)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
 
 # Symmetry
 

@@ -1,6 +1,6 @@
 import sys
 
-from helpers import is_pos_pathable, degrees_between, cardinal_direction_to, is_in_map, is_adjacent, is_adjacent_with_diag, DIRECTIONS, CARDINAL_DIRECTIONS, DIRECTIONS_ORDERED_CARDINALS_FIRST
+from helpers import manhattan_distance, is_pos_pathable, degrees_between, cardinal_direction_to, is_in_map, is_adjacent, is_adjacent_with_diag, DIRECTIONS, CARDINAL_DIRECTIONS, DIRECTIONS_ORDERED_CARDINALS_FIRST
 from collections import deque
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
 
@@ -409,7 +409,6 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
     best_pos = parent[my_loc]
     best_dir = my_loc.direction_to(best_pos)
     
-    
     if going_home:
         conveyor_dir = best_dir
         bldg = rc.get_tile_building_id(my_loc)
@@ -437,6 +436,31 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
     if rc.can_move(best_dir):
         rc.move(best_dir)
     
+
+def is_tile_within_n_cardinal_steps(rc: Controller, start: Position, end: Position, n: int):
+    if start == end: return True
+    if manhattan_distance(start, end) > n: return False
+
+    q = deque([(start, 0)])
+    visited = {start}
+
+    while q:
+        pos, dist = q.popleft()
+
+        if dist == n:
+            continue
+
+        for d in CARDINAL_DIRECTIONS:
+            nxt = pos.add(d)
+            if nxt in visited: continue
+            if not cardinal_virtually_navvable(rc, nxt, d): continue
+            if nxt == end: return True
+            
+            visited.add(nxt)
+            q.append((nxt, dist + 1))
+
+    return False
+
 # Helpers
 
 
