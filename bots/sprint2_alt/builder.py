@@ -9,6 +9,7 @@ from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants, ResourceType
 
 BOT_EXPLORE_TIMEOUT = 8
+AXIONITE_ENABLE_ROUND = 200
 
 class BotState(Enum):
     ECON_EXPLORE = "Explore"
@@ -159,7 +160,7 @@ class BuilderBot(Bot):
                     self.rc.fire(self.rc.get_position())
                 
             (best_target, final_one, is_to_core) = self.compute_best_bridge_target(self.econ_target_is_ax)
-            self.connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 3) or is_to_core or final_one)
+            self.connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 3) or is_to_core)
 
             if self.connect_current_should_bridge:
                 if self.rc.can_build_bridge(self.rc.get_position(), best_target):
@@ -204,7 +205,7 @@ class BuilderBot(Bot):
         ]
         
         (ti, ax) = self.rc.get_global_resources()
-        if self.rc.get_current_round() > 100 and ti > 500:
+        if self.rc.get_current_round() > AXIONITE_ENABLE_ROUND and ti > 500:
             plan.extend([
                 # (2, 2, EntityType.LAUNCHER, Direction.CENTRE),
                 # (-2, 2, EntityType.LAUNCHER, Direction.CENTRE),
@@ -457,7 +458,9 @@ class BuilderBot(Bot):
         if pos is None: return (False, Direction.CENTRE)
         
         (ti, ax) = self.rc.get_global_resources()
-        if is_ax and ti < 300: return (False, Direction.CENTRE)
+        if is_ax:
+            if ti < 300 or self.rc.get_current_round() < AXIONITE_ENABLE_ROUND:
+                return (False, Direction.CENTRE)
         if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
         
         has_free_side = False
