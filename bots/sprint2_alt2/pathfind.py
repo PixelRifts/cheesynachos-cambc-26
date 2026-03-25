@@ -195,6 +195,9 @@ def fast_pathfind_to_virtual(rc: Controller):
                 continue
             if not actually_navvable(rc, nxt):
                 continue
+            bbid = rc.get_tile_builder_bot_id(nxt)
+            if bbid is not None and bbid != rc.get_id():
+                continue
 
             visited.add(nxt)
             parent[nxt] = cur
@@ -216,7 +219,17 @@ def fast_pathfind_to_virtual(rc: Controller):
         rc.build_road(best_pos)
         if rc.can_move(best_dir):
             rc.move(best_dir)
-    
+
+def simple_step(rc: Controller, d: Direction):
+    p = rc.get_position().add(d)
+    if rc.can_move(d):
+        rc.move(d)
+    elif rc.can_build_road(p):
+        rc.build_road(p)
+        if rc.can_move(d):
+            rc.move(d)
+
+
 # Cardinal Pathfinding
 
 def cardinal_pathfind_to(rc: Controller, target: Position, going_home: bool):

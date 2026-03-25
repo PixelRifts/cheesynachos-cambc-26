@@ -104,6 +104,7 @@ class BuilderBot(Bot):
         
 
     def econ_target(self):
+        print('targeting', self.econ_target_ore, 'from', self.pathfind_target)
         (should_connect, dir) = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax)
         if not should_connect:
             self.switch_state(BotState.ECON_EXPLORE)
@@ -127,6 +128,9 @@ class BuilderBot(Bot):
                     self.switch_state(BotState.ECON_CONNECT)
                     self.pathfind_target = self.core_pos
                     self.econ_target_is_ax = is_ax
+            elif self.rc.get_position() == self.econ_target_ore:
+                nextdir = get_empty_adj(self.rc, self.rc.get_position())
+                pathfind.simple_step(self.rc, nextdir)
             else:
                 pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
         elif not allied:
@@ -207,7 +211,6 @@ class BuilderBot(Bot):
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
 
-            
 
     def end_turn(self):
         if self.pathfind_target is not None: self.rc.draw_indicator_line(self.rc.get_position(), self.pathfind_target, 220, 50, 50)

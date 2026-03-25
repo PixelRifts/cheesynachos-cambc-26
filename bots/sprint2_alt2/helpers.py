@@ -162,6 +162,8 @@ def get_empty_adj(rc: Controller, a: Position) -> Direction:
         p = a.add(d)
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
         if is_pos_pathable(rc, p): return d
     return Direction.CENTRE
 
