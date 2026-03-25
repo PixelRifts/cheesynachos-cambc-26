@@ -2,7 +2,7 @@ import sys
 import pathfind
 import random
 
-from helpers import get_best_empty_adj, get_empty_adj, is_friendly_transport, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
+from helpers import get_furthest_tile_in_dir, get_best_empty_adj, get_empty_adj, is_friendly_transport, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
 
 from enum import Enum
 from bot import Bot
@@ -31,10 +31,12 @@ class BuilderBot(Bot):
 
         self.switch_state(BotState.ECON_EXPLORE)
         self.econ_explore_dir = rc.get_position().direction_to(self.map_center_pos)
+        self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
 
     def reset_state_variables(self):
         self.pathfind_target: Position = None
         self.econ_explore_dir: Direction = Direction.CENTRE
+        self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
         self.econ_explore_timeout: int = BOT_EXPLORE_TIMEOUT
         self.econ_target_ore: Position = None
         self.econ_target_is_ax: bool = False
@@ -85,22 +87,20 @@ class BuilderBot(Bot):
         if self.econ_explore_timeout == 0:
             self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
             self.econ_explore_dir = biased_random_dir(self.rc)
+            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
 
         # Actual Move
-        next_pos = self.rc.get_position().add(self.econ_explore_dir)
-        if not is_in_map(next_pos, self.rc.get_map_width(), self.rc.get_map_height()):
+        # if self.rc.can_move(self.econ_explore_dir):
+        #     self.rc.move(self.econ_explore_dir)
+        # elif self.rc.is_tile_empty(next_pos):
+        #     if self.rc.can_build_road(next_pos):
+        #         self.rc.build_road(next_pos)
+        #         if self.rc.can_move(self.econ_explore_dir):
+        #             self.rc.move(self.econ_explore_dir)
+        if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
+            self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
             self.econ_explore_dir = biased_random_dir(self.rc)
-            return
-
-        if self.rc.can_move(self.econ_explore_dir):
-            self.rc.move(self.econ_explore_dir)
-        elif self.rc.is_tile_empty(next_pos):
-            if self.rc.can_build_road(next_pos):
-                self.rc.build_road(next_pos)
-                if self.rc.can_move(self.econ_explore_dir):
-                    self.rc.move(self.econ_explore_dir)
-        else:
-            self.econ_explore_dir = biased_random_dir(self.rc)
+            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
         
 
     def econ_target(self):
@@ -108,46 +108,31 @@ class BuilderBot(Bot):
         if not should_connect:
             self.switch_state(BotState.ECON_EXPLORE)
             self.econ_explore_dir = biased_random_dir(self.rc)
+            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
             return
 
-        if is_adjacent(self.rc.get_position(), self.econ_target_ore):
-            if not self.rc.is_tile_empty(self.econ_target_ore) and get_building_type(self.rc, self.econ_target_ore) != EntityType.HARVESTER:
-                if self.rc.can_destroy(self.econ_target_ore):
-                    self.rc.destroy(self.econ_target_ore)
-            if self.rc.can_build_harvester(self.econ_target_ore):
-                self.rc.build_harvester(self.econ_target_ore)
+        bldg = self.rc.get_tile_building_id(self.econ_target_ore)
+        allied = self.rc.get_team(bldg) == self.rc.get_team()
+        if allied or get_building_type(self.rc, self.econ_target_ore) == EntityType.HARVESTER:
+            if is_adjacent(self.rc.get_position(), self.econ_target_ore):
+                if not self.rc.is_tile_empty(self.econ_target_ore) and get_building_type(self.rc, self.econ_target_ore) != EntityType.HARVESTER:
+                    if self.rc.can_destroy(self.econ_target_ore):
+                        self.rc.destroy(self.econ_target_ore)
+                if self.rc.can_build_harvester(self.econ_target_ore):
+                    self.rc.build_harvester(self.econ_target_ore)
 
-            bldg = self.rc.get_tile_building_id(self.econ_target_ore)
-            if bldg is not None and self.rc.get_entity_type(bldg) == EntityType.HARVESTER:
-                is_ax = self.econ_target_is_ax
-                self.switch_state(BotState.ECON_CONNECT)
-                self.pathfind_target = self.core_pos
-                self.econ_target_is_ax = is_ax
-        else:
-            pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
-
-        
-        # bldg = self.rc.get_tile_building_id(self.econ_target_ore)
-        # allied = self.rc.get_team(bldg) == self.rc.get_team()
-        # if allied or get_building_type(self.rc, self.econ_target_ore) == EntityType.HARVESTER:
-        #     if is_adjacent(self.rc.get_position(), self.econ_target_ore):
-        #         if not self.rc.is_tile_empty(self.econ_target_ore) and get_building_type(self.rc, self.econ_target_ore) != EntityType.HARVESTER:
-        #             if self.rc.can_destroy(self.econ_target_ore):
-        #                 self.rc.destroy(self.econ_target_ore)
-        #         if self.rc.can_build_harvester(self.econ_target_ore):
-        #             self.rc.build_harvester(self.econ_target_ore)
-
-        #         if bldg is not None and self.rc.get_entity_type(bldg) == EntityType.HARVESTER:
-        #             is_ax = self.econ_target_is_ax
-        #             self.switch_state(BotState.ECON_CONNECT)
-        #             self.pathfind_target = self.core_pos
-        #             self.econ_target_is_ax = is_ax
-        #     else:
-        #         pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
-        # else:
-        #     if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
-        #         if self.rc.can_fire(self.pathfind_target):
-        #             self.rc.fire(self.pathfind_target)
+                bldg = self.rc.get_tile_building_id(self.econ_target_ore)
+                if bldg is not None and self.rc.get_entity_type(bldg) == EntityType.HARVESTER:
+                    is_ax = self.econ_target_is_ax
+                    self.switch_state(BotState.ECON_CONNECT)
+                    self.pathfind_target = self.core_pos
+                    self.econ_target_is_ax = is_ax
+            else:
+                pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
+        elif not allied:
+            if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
+                if self.rc.can_fire(self.pathfind_target):
+                    self.rc.fire(self.pathfind_target)
 
     def econ_connect(self):
         # if self.state_custom_sub_state == 0:
@@ -199,6 +184,7 @@ class BuilderBot(Bot):
                 print('final one apparently')
                 self.switch_state(BotState.ECON_EXPLORE)
                 self.econ_explore_dir = biased_random_dir(self.rc)
+                self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
 
 
@@ -207,6 +193,7 @@ class BuilderBot(Bot):
             if not is_in_map(self.pathfind_target, self.rc.get_map_width(), self.rc.get_map_height()) or not self.rc.is_in_vision(self.pathfind_target):
                 self.switch_state(BotState.ECON_EXPLORE)
                 self.econ_explore_dir = biased_random_dir(self.rc)
+                self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
             
             bldg = self.rc.get_tile_building_id(self.pathfind_target)
@@ -217,6 +204,7 @@ class BuilderBot(Bot):
             else:
                 self.switch_state(BotState.ECON_EXPLORE)
                 self.econ_explore_dir = biased_random_dir(self.rc)
+                self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
 
             
@@ -508,8 +496,9 @@ class BuilderBot(Bot):
         has_free_side = False
         already_siphoned = False
         not_enough_info = False
-        
+        harvester_placable = is_pos_editable(self.rc, pos)
         has_harvester = get_building_type(self.rc, pos) == EntityType.HARVESTER
+        
         # if bldg is None or (self.rc.get_entity_type(bldg) == EntityType.HARVESTER):
         for d in CARDINAL_DIRECTIONS:
             p = pos.add(d)
@@ -528,10 +517,13 @@ class BuilderBot(Bot):
             if self.rc.is_tile_empty(p) or is_pos_editable(self.rc, p):
                 has_free_side = True
         
-        already_siphoned = already_siphoned and has_harvester
+        if has_harvester and already_siphoned: return (False, Direction.CENTRE)
+        if not has_harvester and already_siphoned: return (harvester_placable, get_best_empty_adj(self.rc, pos, self.core_pos))
+        
+        if has_harvester and not already_siphoned: return (not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
+        if not has_harvester and not already_siphoned and harvester_placable: return (not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
 
-        return (has_free_side and not already_siphoned and not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
-        # return (False, Direction.CENTRE)
+        return (False, Direction.CENTRE)
     
     # def ore_is_hijacked(self, pos: Position) -> (bool, Direction):
     #     if pos is None: return (False, Direction.CENTRE)

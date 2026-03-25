@@ -68,6 +68,29 @@ def biased_random_dir(rc: Controller) -> Direction:
         return rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
     return random.choice(DIRECTIONS)
 
+def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> Position:
+    width = rc.get_map_width()
+    height = rc.get_map_height()
+
+    (dx, dy) = dir.delta()
+
+    if dx > 0:
+        steps_x = (width - 1 - pos.x) // dx
+    elif dx < 0:
+        steps_x = pos.x // (-dx)
+    else:
+        steps_x = float('inf')
+
+    if dy > 0:
+        steps_y = (height - 1 - pos.y) // dy
+    elif dy < 0:
+        steps_y = pos.y // (-dy)
+    else:
+        steps_y = float('inf')
+
+    steps = min(steps_x, steps_y)
+    return Position(pos.x + dx * steps, pos.y + dy * steps)
+
 # Pathfind
 
 def is_friendly_transport(rc: Controller, pos: Position) -> bool:
@@ -150,12 +173,13 @@ def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue
         if not is_pos_pathable(rc, p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
         dist = p.distance_squared(b)
         if dist < best_dist:
             best_dist = dist
             best_dir = d
     return best_dir
-
 
 # Symmetry
 

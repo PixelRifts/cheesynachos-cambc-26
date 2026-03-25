@@ -412,21 +412,27 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
     best_pos = parent[my_loc]
     best_dir = my_loc.direction_to(best_pos)
     
-    if going_home:
-        conveyor_dir = best_dir
-        bldg = rc.get_tile_building_id(my_loc)
-        if bldg is None or (rc.get_entity_type(bldg) == EntityType.CONVEYOR and\
-            rc.get_direction(bldg) != conveyor_dir):
+    # Verify conveyor direction below
+    conveyor_dir = best_dir
+    bldg = rc.get_tile_building_id(my_loc)
+
+    if bldg is None or \
+        not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
+        allied = rc.get_team(bldg) == rc.get_team()
+        if allied:
             if rc.can_destroy(my_loc): rc.destroy(my_loc)
-            if rc.can_build_conveyor(my_loc, conveyor_dir):
-                rc.build_conveyor(my_loc, conveyor_dir)
-            return
-        
+        else:
+            if rc.can_fire(my_loc): rc.fire(my_loc)
+        if rc.can_build_conveyor(my_loc, conveyor_dir):
+            rc.build_conveyor(my_loc, conveyor_dir)
+        return
+    
+    if going_home:
         next_pos = parent.get(best_pos)
         if next_pos:
             conveyor_dir = best_pos.direction_to(next_pos)
         else:
-            conveyor_dir = best_dir.opposite()
+            conveyor_dir = best_dir
     else:
         conveyor_dir = best_dir.opposite()
 
