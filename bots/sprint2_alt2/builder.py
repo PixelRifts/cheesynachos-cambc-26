@@ -2,7 +2,7 @@ import sys
 import pathfind
 import random
 
-from helpers import get_furthest_tile_in_dir, get_best_empty_adj, get_empty_adj, is_friendly_transport, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
+from helpers import get_furthest_tile_in_dir, get_best_empty_adj, get_empty_adj, get_empty_adj_with_diag, is_friendly_transport, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
 
 from enum import Enum
 from bot import Bot
@@ -129,8 +129,11 @@ class BuilderBot(Bot):
                     self.pathfind_target = self.core_pos
                     self.econ_target_is_ax = is_ax
             elif self.rc.get_position() == self.econ_target_ore:
-                nextdir = get_empty_adj(self.rc, self.rc.get_position())
-                pathfind.simple_step(self.rc, nextdir)
+                nextdir = get_empty_adj_with_diag(self.rc, self.rc.get_position())
+                if nextdir is Direction.CENTRE:
+                    self.rc.self_destruct()
+                else:
+                    pathfind.simple_step(self.rc, nextdir)
             else:
                 pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
         elif not allied:
@@ -449,12 +452,14 @@ class BuilderBot(Bot):
         # --- 3. pick best new bridge position ---
         best = None
         best_dist = float('inf')
+        build_finish = False
 
         for dx in range(-3, 4):
             for dy in range(-3, 4):
                 if dx*dx + dy*dy > GameConstants.BRIDGE_TARGET_RADIUS_SQ:
                     continue
 
+                is_to_existing_transport = False
                 pos = Position(start.x + dx, start.y + dy)
 
                 if not is_in_map(pos, width, height):
@@ -473,18 +478,22 @@ class BuilderBot(Bot):
                         continue
                     if self.connect_current_run.__contains__(pos):
                         continue
-                    if entt != EntityType.ROAD and rc.get_stored_resource(bldg) is not None:
-                        continue
+                    if entt != EntityType.ROAD:
+                        if rc.get_stored_resource(bldg) is not None:
+                            continue
+                        is_to_existing_transport = True
+
 
                 d = dist_to_core(pos)
                 
                 if d < best_dist:
                     best_dist = d
                     best = pos
-                    # build_finish = is_to_bridge
+                    
+                    build_finish = is_to_existing_transport
 
-        print('track4', best if best is not None else start)
-        return (best if best is not None else start, False, False)
+        print('track4', best if best is not None else start, build_finish)
+        return (best if best is not None else start, build_finish, False)
     
 
     def should_connect_to_ore(self, pos: Position, is_ax: bool) -> (bool, Direction):
@@ -498,6 +507,7 @@ class BuilderBot(Bot):
         
         has_free_side = False
         already_siphoned = False
+        bot_marked = False
         not_enough_info = False
         harvester_placable = is_pos_editable(self.rc, pos)
         has_harvester = get_building_type(self.rc, pos) == EntityType.HARVESTER
@@ -509,10 +519,12 @@ class BuilderBot(Bot):
             if not self.rc.is_in_vision(p):
                 not_enough_info = True
                 continue
+
             bb = self.rc.get_tile_builder_bot_id(p)
             if bb is not None and self.rc.get_id() != bb:
                 if self.rc.get_team(bb) == self.rc.get_team():
-                    already_siphoned = True
+                    bot_marked = True
+
             if is_friendly_transport(self.rc, p):
                 already_siphoned = True
             # if is_enemy_transport(self.rc, p):
@@ -520,9 +532,9 @@ class BuilderBot(Bot):
             if self.rc.is_tile_empty(p) or is_pos_editable(self.rc, p):
                 has_free_side = True
         
+        if bot_marked: return (False, Direction.CENTRE)
         if has_harvester and already_siphoned: return (False, Direction.CENTRE)
         if not has_harvester and already_siphoned: return (harvester_placable, get_best_empty_adj(self.rc, pos, self.core_pos))
-        
         if has_harvester and not already_siphoned: return (not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
         if not has_harvester and not already_siphoned and harvester_placable: return (not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
 

@@ -157,6 +157,16 @@ def manhattan_distance(a: Position, b: Position) -> int:
     dy = abs(a.y - b.y)
     return dx + dy
 
+def get_empty_adj_with_diag(rc: Controller, a: Position) -> Direction:
+    for d in DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        if is_pos_pathable(rc, p): return d
+    return Direction.CENTRE
+
 def get_empty_adj(rc: Controller, a: Position) -> Direction:
     for d in CARDINAL_DIRECTIONS:
         p = a.add(d)

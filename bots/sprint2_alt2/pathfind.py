@@ -431,6 +431,7 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
 
     if bldg is None or \
         not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
+        print(rc.get_entity_type(bldg))
         allied = rc.get_team(bldg) == rc.get_team()
         if allied:
             if rc.can_destroy(my_loc): rc.destroy(my_loc)
@@ -451,7 +452,7 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
 
     bldg = rc.get_tile_building_id(best_pos)
     if bldg is not None and rc.can_destroy(best_pos) and \
-        (rc.get_entity_type(bldg) != EntityType.CONVEYOR and rc.get_entity_type(bldg) != EntityType.SPLITTER):
+        (rc.get_entity_type(bldg) != EntityType.CONVEYOR and rc.get_entity_type(bldg) != EntityType.SPLITTER and rc.get_entity_type(bldg) != EntityType.BRIDGE):
         rc.destroy(best_pos)
     if rc.can_build_conveyor(best_pos, conveyor_dir):
         rc.build_conveyor(best_pos, conveyor_dir)
