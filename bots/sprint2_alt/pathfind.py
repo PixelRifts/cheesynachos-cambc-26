@@ -267,10 +267,6 @@ def recompute_cardinal_virtual_target(rc: Controller):
             break
         # print("Iter --", current, file=sys.stderr)
 
-        flag = False
-        if current == Position(21, 15):
-            flag = True
-
         steps += 1
 
         if pf_state.should_bug:
@@ -308,8 +304,7 @@ def recompute_cardinal_virtual_target(rc: Controller):
                 for _ in range(8):
                     candidate_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
                     new_loc = current.add(candidate_dir)
-                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir, debug=flag):
-                        if flag: print(candidate_dir, "worked", file=sys.stderr)
+                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir):
                         current_loc = new_loc
                         picked_dir = candidate_dir
                         break

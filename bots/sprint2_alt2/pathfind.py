@@ -244,10 +244,10 @@ def cardinal_pathfind_to(rc: Controller, target: Position, going_home: bool):
     if rc.get_position() == target:
         return True
 
-    if rc.get_position().distance_squared(target) == 1:
-        if rc.can_move(rc.get_position().direction_to(target)):
-            rc.move(rc.get_position().direction_to(target))
-            return True
+    # if rc.get_position().distance_squared(target) == 1:
+    #     if rc.can_move(rc.get_position().direction_to(target)):
+    #         rc.move(rc.get_position().direction_to(target))
+    #         return True
 
     if rc.get_position() == pf_state.virtual_target:
         pf_state.bug_cooldown = 8
@@ -279,10 +279,6 @@ def recompute_cardinal_virtual_target(rc: Controller):
         if current == pf_state.final_target:
             break
         # print("Iter --", current, file=sys.stderr)
-
-        flag = False
-        if current == Position(21, 15):
-            flag = True
 
         steps += 1
 
@@ -321,8 +317,7 @@ def recompute_cardinal_virtual_target(rc: Controller):
                 for _ in range(8):
                     candidate_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
                     new_loc = current.add(candidate_dir)
-                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir, debug=flag):
-                        if flag: print(candidate_dir, "worked", file=sys.stderr)
+                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir):
                         current_loc = new_loc
                         picked_dir = candidate_dir
                         break
@@ -429,10 +424,10 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
     conveyor_dir = best_dir
     bldg = rc.get_tile_building_id(my_loc)
 
-    if bldg is None or \
-        not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
-        print(rc.get_entity_type(bldg))
+    if bldg is not None: print(my_loc, rc.get_entity_type(bldg))
+    if bldg is None or not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
         allied = rc.get_team(bldg) == rc.get_team()
+        print(my_loc, 'this right here')
         if allied:
             if rc.can_destroy(my_loc): rc.destroy(my_loc)
         else:
@@ -451,9 +446,14 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
         conveyor_dir = best_dir.opposite()
 
     bldg = rc.get_tile_building_id(best_pos)
-    if bldg is not None and rc.can_destroy(best_pos) and \
-        (rc.get_entity_type(bldg) != EntityType.CONVEYOR and rc.get_entity_type(bldg) != EntityType.SPLITTER and rc.get_entity_type(bldg) != EntityType.BRIDGE):
-        rc.destroy(best_pos)
+    if bldg is not None or not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
+        allied = rc.get_team(bldg) == rc.get_team()
+        if allied:
+            if not (rc.get_entity_type(bldg) == EntityType.SPLITTER or rc.get_entity_type(bldg) == EntityType.BRIDGE):
+                if rc.can_destroy(best_pos):
+                    rc.destroy(best_pos)
+            
+        
     if rc.can_build_conveyor(best_pos, conveyor_dir):
         rc.build_conveyor(best_pos, conveyor_dir)
     if rc.can_move(best_dir):
@@ -478,6 +478,7 @@ def is_tile_within_n_cardinal_steps(rc: Controller, start: Position, end: Positi
         for d in CARDINAL_DIRECTIONS:
             nxt = pos.add(d)
             if nxt in visited: continue
+            
             if not cardinal_virtually_navvable(rc, nxt, d): continue
             if nxt == end: return True
             

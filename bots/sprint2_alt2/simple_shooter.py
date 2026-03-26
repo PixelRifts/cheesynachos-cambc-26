@@ -21,11 +21,11 @@ priorities = {
     EntityType.SPLITTER: 20,
     EntityType.ARMOURED_CONVEYOR: 10,
     EntityType.BRIDGE: 10,
-    EntityType.HARVESTER: 10,
+    EntityType.HARVESTER: -100,
     EntityType.FOUNDRY: 100,
     EntityType.ROAD: 1,
     EntityType.BARRIER: 1,
-    EntityType.MARKER: -10,
+    EntityType.MARKER: 1,
 }
 
 class SimpleShooter(Bot):
@@ -39,18 +39,20 @@ class SimpleShooter(Bot):
         entities = self.rc.get_nearby_entities()
         priority = -100000
         for e in entities:
+            p = self.rc.get_position(e)
             if self.rc.get_team(e) == self.rc.get_team():
                 continue
             entt = self.rc.get_entity_type(e)
-            if priorities[entt] > priority:
+            print(e, '@', p, ' - ', priorities[entt])
+            if priorities[entt] < 0: continue
+            if priorities[entt] > priority and self.rc.can_fire(p):
                 priority = priorities[entt]
-                self.best_target = self.rc.get_position(e)
+                self.best_target = p
         pass
 
     def turn(self):
         if self.best_target is not None:
-            if self.rc.can_fire(self.best_target):
-                self.rc.fire(self.best_target)
+            self.rc.fire(self.best_target)
         pass
 
     def end_turn(self):

@@ -91,7 +91,7 @@ def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> P
     steps = min(steps_x, steps_y)
     return Position(pos.x + dx * steps, pos.y + dy * steps)
 
-# Pathfind
+# Quick entity checks
 
 def is_friendly_transport(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return False
@@ -108,6 +108,23 @@ def is_enemy_transport(rc: Controller, pos: Position) -> bool:
     allied = rc.get_team(bldg) == rc.get_team()
     entt = rc.get_entity_type(bldg)
     return not allied and (entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE)
+
+def is_friendly_turret(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return False
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return False
+    allied = rc.get_team(bldg) == rc.get_team()
+    entt = rc.get_entity_type(bldg)
+    return allied and (entt == EntityType.GUNNER or entt == EntityType.SENTINEL or entt == EntityType.BREACH or entt == EntityType.LAUNCHER)
+
+def is_friendly_bot(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return False
+    bb = rc.get_tile_builder_bot_id(pos)
+    if bb is None: return False
+    allied = rc.get_team(bb) == rc.get_team()
+    return allied
+
+# Quick Position Checks
 
 def is_pos_pathable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos) or rc.is_tile_passable(pos): return True
@@ -129,6 +146,17 @@ def is_pos_editable(rc: Controller, pos: Position) -> bool:
     if bldg is None: return True
     allied = rc.get_team() == rc.get_team(bldg)
     return allied
+
+def is_pos_turretable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return True
+    allied = rc.get_team() == rc.get_team(bldg)
+    entt = rc.get_entity_type(bldg)
+    return is_enemy_transport() or (allied and entt == EntityType.ROAD or entt == EntityType.MARKER)
 
 def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
     if entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE or entt == EntityType.ROAD or entt == EntityType.MARKER:

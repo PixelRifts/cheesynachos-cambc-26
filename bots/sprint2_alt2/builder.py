@@ -2,13 +2,13 @@ import sys
 import pathfind
 import random
 
-from helpers import get_furthest_tile_in_dir, get_best_empty_adj, get_empty_adj, get_empty_adj_with_diag, is_friendly_transport, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
+from helpers import get_furthest_tile_in_dir, get_best_empty_adj, get_empty_adj, get_empty_adj_with_diag, is_friendly_transport, is_friendly_turret, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_turretable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
 
 from enum import Enum
 from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants, ResourceType
 
-BOT_EXPLORE_TIMEOUT = 8
+BOT_EXPLORE_TIMEOUT = 12
 AXIONITE_ENABLE_ROUND = 200
 
 class BotState(Enum):
@@ -30,7 +30,7 @@ class BuilderBot(Bot):
         self.map_center_pos = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
 
         self.switch_state(BotState.ECON_EXPLORE)
-        self.econ_explore_dir = rc.get_position().direction_to(self.map_center_pos)
+        self.econ_explore_dir = biased_random_dir(self.rc)
         self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
 
     def reset_state_variables(self):
@@ -40,9 +40,12 @@ class BuilderBot(Bot):
         self.econ_explore_timeout: int = BOT_EXPLORE_TIMEOUT
         self.econ_target_ore: Position = None
         self.econ_target_is_ax: bool = False
-        self.connect_current_target: Position = None
-        self.connect_current_run: list[Position] = []
-        self.connect_current_should_bridge: bool = True
+        self.econ_connect_current_target: Position = None
+        self.econ_connect_current_run: list[Position] = []
+        self.econ_connect_current_should_bridge: bool = True
+        self.econ_protect_turret_loc = None
+        self.econ_protect_turret_dir = Direction.CENTRE
+        self.econ_protect_return_loc = self.rc.get_position()
         
         # Some states want sub-states
         self.state_custom_sub_state: int = 0
@@ -63,6 +66,8 @@ class BuilderBot(Bot):
                 self.econ_target()
             case BotState.ECON_CONNECT:
                 self.econ_connect()
+                if self.econ_connect_current_target is not None:
+                    self.rc.draw_indicator_dot(self.econ_connect_current_target, 255, 0, 255 if self.econ_connect_current_should_bridge else 0)
             case BotState.ECON_NUKE:
                 self.econ_nuke()
     
@@ -97,10 +102,26 @@ class BuilderBot(Bot):
         #         self.rc.build_road(next_pos)
         #         if self.rc.can_move(self.econ_explore_dir):
         #             self.rc.move(self.econ_explore_dir)
-        if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
-            self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
-            self.econ_explore_dir = biased_random_dir(self.rc)
-            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+
+        if self.rc.get_current_round() < 200:
+            next_pos = self.rc.get_position().add(self.econ_explore_dir)
+            if not pathfind.is_in_map(next_pos, self.rc.get_map_width(), self.rc.get_map_height()):
+                self.econ_explore_dir = biased_random_dir(self.rc)
+                return
+            if self.rc.can_move(self.econ_explore_dir):
+                self.rc.move(self.econ_explore_dir)
+            elif self.rc.is_tile_empty(next_pos):
+                if self.rc.can_build_road(next_pos):
+                    self.rc.build_road(next_pos)
+                    if self.rc.can_move(self.econ_explore_dir):
+                        self.rc.move(self.econ_explore_dir)
+            else:
+                self.econ_explore_dir = biased_random_dir(self.rc)
+        else:
+            if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
+                self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
+                self.econ_explore_dir = biased_random_dir(self.rc)
+                self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
         
 
     def econ_target(self):
@@ -125,8 +146,10 @@ class BuilderBot(Bot):
                 bldg = self.rc.get_tile_building_id(self.econ_target_ore)
                 if bldg is not None and self.rc.get_entity_type(bldg) == EntityType.HARVESTER:
                     is_ax = self.econ_target_is_ax
+                    ore_pos = self.econ_target_ore
                     self.switch_state(BotState.ECON_CONNECT)
                     self.pathfind_target = self.core_pos
+                    self.econ_target_ore = ore_pos
                     self.econ_target_is_ax = is_ax
             elif self.rc.get_position() == self.econ_target_ore:
                 nextdir = get_empty_adj_with_diag(self.rc, self.rc.get_position())
@@ -155,13 +178,48 @@ class BuilderBot(Bot):
         #     
         #
 
+        if self.state_custom_sub_state == 0:
+            (should_protect, where, dir) = self.get_best_protector_dir(self.econ_target_ore)
+            if should_protect:
+                if self.rc.can_destroy(where):
+                    self.rc.destroy(where)
+                elif is_enemy_transport(self.rc, where):
+                    self.state_custom_sub_state = 1
+                    self.econ_protect_turret_loc = where
+                    self.econ_protect_turret_dir = dir
+                    self.econ_protect_return_loc = self.rc.get_position()
+                if self.rc.can_build_sentinel(where, dir):
+                    self.rc.build_sentinel(where, dir)
+                    return
+        # Move to turret pos
+        if self.state_custom_sub_state == 1:
+            if pathfind.fast_pathfind_to(self.rc, self.econ_protect_turret_loc):
+                self.state_custom_sub_state = 2
+        # Destroy enemy stuff
+        if self.state_custom_sub_state == 2:
+            if self.rc.can_fire(self.rc.get_position()):
+                self.rc.fire(self.rc.get_position())
+            if self.rc.get_tile_building_id(self.rc.get_position()) is None:
+                self.state_custom_sub_state = 3
+        # Go back to where we came from
+        if self.state_custom_sub_state == 3:
+            if pathfind.fast_pathfind_to(self.rc, self.econ_protect_turret_loc):
+                self.state_custom_sub_state = 0
+                self.econ_protect_turret_loc = None
+                self.econ_protect_turret_dir = Direction.CENTRE
+                self.econ_protect_return_loc = self.rc.get_position()
         
-        if self.connect_current_target is not None and self.rc.get_position() != self.connect_current_target:
-            if self.connect_current_should_bridge:
-                pathfind.fast_pathfind_to(self.rc, self.connect_current_target)
+        # TODO maybe remove
+        if self.state_custom_sub_state != 0: return
+
+        final_marked = False
+        if self.econ_connect_current_target is not None and self.rc.get_position() != self.econ_connect_current_target:
+            if self.econ_connect_current_should_bridge:
+                pathfind.fast_pathfind_to(self.rc, self.econ_connect_current_target)
             else:
-                pathfind.cardinal_pathfind_to(self.rc, self.connect_current_target, True)
-                self.connect_current_run.append(self.rc.get_position())
+                if pathfind.cardinal_pathfind_to(self.rc, self.econ_connect_current_target, True):
+                    final_marked = True
+                self.econ_connect_current_run.append(self.rc.get_position())
             
         else:
             bldg = self.rc.get_tile_building_id(self.rc.get_position())
@@ -175,19 +233,20 @@ class BuilderBot(Bot):
                     self.rc.fire(self.rc.get_position())
                 
             (best_target, final_one, is_to_core) = self.compute_best_bridge_target(self.econ_target_is_ax)
-            self.connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 3) or is_to_core)
+            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 2) or is_to_core)
 
-            if self.connect_current_should_bridge:
+            if self.econ_connect_current_should_bridge:
                 if self.rc.can_build_bridge(self.rc.get_position(), best_target):
                     self.rc.build_bridge(self.rc.get_position(), best_target)
-                    self.connect_current_run.append(self.rc.get_position())
+                    self.econ_connect_current_run.append(self.rc.get_position())
+                    final_marked = True
                 else:
                     # print('best_target=',best_target, file=sys.stderr
                     return
             
-            self.connect_current_target = best_target
+            self.econ_connect_current_target = best_target
 
-            if final_one:
+            if final_one and final_marked:
                 print('final one apparently')
                 self.switch_state(BotState.ECON_EXPLORE)
                 self.econ_explore_dir = biased_random_dir(self.rc)
@@ -433,7 +492,7 @@ class BuilderBot(Bot):
 
         #             if rc.get_entity_type(building_id) != EntityType.BRIDGE and rc.get_entity_type(building_id) != EntityType.CONVEYOR and rc.get_entity_type(building_id) != EntityType.SPLITTER:
         #                 continue
-        #             if self.connect_current_run.__contains__(pos):
+        #             if self.econ_connect_current_run.__contains__(pos):
         #                 continue
                     
         #             testing_resource = ResourceType.RAW_AXIONITE if connecting_ax else ResourceType.TITANIUM
@@ -476,7 +535,7 @@ class BuilderBot(Bot):
                         continue
                     if entt != EntityType.ROAD and entt != EntityType.BRIDGE and entt != EntityType.CONVEYOR and entt != EntityType.SPLITTER:
                         continue
-                    if self.connect_current_run.__contains__(pos):
+                    if self.econ_connect_current_run.__contains__(pos):
                         continue
                     if entt != EntityType.ROAD:
                         if rc.get_stored_resource(bldg) is not None:
@@ -505,6 +564,8 @@ class BuilderBot(Bot):
                 return (False, Direction.CENTRE)
         if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
         
+        if is_friendly_transport(self.rc, pos): return (False, Direction.CENTRE)
+        
         has_free_side = False
         already_siphoned = False
         bot_marked = False
@@ -529,7 +590,7 @@ class BuilderBot(Bot):
                 already_siphoned = True
             # if is_enemy_transport(self.rc, p):
             #     enemy_picking = d
-            if self.rc.is_tile_empty(p) or is_pos_editable(self.rc, p):
+            if is_pos_editable(self.rc, p):
                 has_free_side = True
         
         if bot_marked: return (False, Direction.CENTRE)
@@ -540,6 +601,37 @@ class BuilderBot(Bot):
 
         return (False, Direction.CENTRE)
     
+    def get_best_protector_dir(self, pos: Position) -> (bool, Position, Direction):
+        if pos is None: return (False, Direction.CENTRE)
+
+        free_pos = None
+        has_turret = False
+        for d in CARDINAL_DIRECTIONS:
+            p = pos.add(d)
+            if not is_in_map(p, self.rc.get_map_width(), self.rc.get_map_height()): continue
+            if not self.rc.is_in_vision(p): continue
+            
+            env = self.rc.get_tile_env(p)
+            if env != Environment.EMPTY: continue
+
+            bldg = self.rc.get_tile_building_id(p)
+            if bldg is not None:
+                if is_friendly_turret(self.rc, p):
+                    has_turret = True
+                    break
+                continue
+
+            if is_pos_turretable(self.rc, p) and is_adjacent_with_diag(p, self.rc.get_position()):
+                free_pos = p
+
+        if has_turret: return (False, None, Direction.CENTRE)
+        
+        if free_pos is not None:
+            dir = pos.direction_to(free_pos).rotate_left().opposite()
+            return (True, free_pos, dir)
+        
+        return (False, None, Direction.CENTRE)
+
     # def ore_is_hijacked(self, pos: Position) -> (bool, Direction):
     #     if pos is None: return (False, Direction.CENTRE)
     #     if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)

@@ -7,7 +7,7 @@ import pathfind
 from helpers import RANDOM_SEED
 from core import Core
 from builder import BuilderBot
-
+from simple_shooter import SimpleShooter
 
 class Player:
     def __init__(self):
@@ -23,6 +23,8 @@ class Player:
                 self.brain = Core(rc)
             elif entt == EntityType.BUILDER_BOT:
                 self.brain = BuilderBot(rc)
+            elif entt == EntityType.SENTINEL:
+                self.brain = SimpleShooter(rc)
         
         self.brain.start_turn()
         self.brain.turn()
