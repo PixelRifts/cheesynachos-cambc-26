@@ -1,5 +1,6 @@
 import sys
 import pathfind
+import sense
 import random
 
 from helpers import get_furthest_tile_in_dir, get_best_empty_adj, get_empty_adj, get_empty_adj_with_diag, is_friendly_transport, is_friendly_turret, is_enemy_transport, is_entt_pathable, is_pos_editable, is_pos_turretable, is_pos_pathable, get_building_type, is_adjacent, is_adjacent_with_diag, cardinal_direction_to, biased_random_dir, is_in_map, guess_symmetry, get_symmetric, DIRECTIONS, CARDINAL_DIRECTIONS
@@ -20,6 +21,7 @@ class BotState(Enum):
 class BuilderBot(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
+        sense.sense_state.setup(rc)
         
         self.core_pos = self.rc.get_position()
         buildings = rc.get_nearby_buildings(3)
@@ -28,6 +30,8 @@ class BuilderBot(Bot):
                 self.core_pos = rc.get_position(b)
                 break
         self.map_center_pos = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
+        # self.econ_tracked_ore = set()
+        self.base_stage = 0
 
         self.switch_state(BotState.ECON_EXPLORE)
         self.econ_explore_dir = biased_random_dir(self.rc)
@@ -56,6 +60,8 @@ class BuilderBot(Bot):
         self.reset_state_variables()
 
     def start_turn(self):
+        sense.update_sense(self.rc)
+        print(sense.sense_state.symmetries_possible)
         pass
     
     def turn(self):
@@ -76,6 +82,11 @@ class BuilderBot(Bot):
         if not self.verify_defences():
             return
 
+        # if self.state_turn_counter == 1:
+        #     if len(self.econ_tracked_ore) > 0:
+        #         track = self.econ_tracked_ore.pop()
+        #         self.pathfind_target = track
+
         # Possibly Find and Target Ore TITANIUM
         decided_ore = None
         decided_dir = Direction.CENTRE
@@ -86,13 +97,16 @@ class BuilderBot(Bot):
             if env == Environment.ORE_TITANIUM or env == Environment.ORE_AXIONITE:
                 (should_connect, dir) = self.should_connect_to_ore(pos, env == Environment.ORE_AXIONITE)
                 dist = pos.distance_squared(self.rc.get_position())
-                if should_connect and dist < decided_min_distance:
-                    decided_min_distance = dist
-                    decided_dir = dir
-                    decided_ore = pos
-                    decided_is_ax = env == Environment.ORE_AXIONITE
-        
+                if should_connect:
+                    # self.econ_tracked_ore.add(pos)
+                    if dist < decided_min_distance:
+                        decided_min_distance = dist
+                        decided_dir = dir
+                        decided_ore = pos
+                        decided_is_ax = env == Environment.ORE_AXIONITE
+                    
         if decided_ore is not None:
+            # self.econ_tracked_ore.remove(decided_ore)
             self.switch_state(BotState.ECON_TARGET)
             self.econ_target_ore = decided_ore
             self.pathfind_target = decided_ore.add(decided_dir)
@@ -245,7 +259,7 @@ class BuilderBot(Bot):
                     self.rc.fire(self.rc.get_position())
                 
             (best_target, final_one, is_to_core) = self.compute_best_bridge_target(self.econ_target_is_ax)
-            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 2) or is_to_core)
+            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 3) or is_to_core)
 
             if self.econ_connect_current_should_bridge:
                 if self.rc.can_build_bridge(self.rc.get_position(), best_target):
@@ -295,32 +309,32 @@ class BuilderBot(Bot):
     # CORE DEFENCE PLAN
     
     def get_defence_plan(self):
-        plan = [
-            # (2, 2, EntityType.LAUNCHER, Direction.CENTRE),
-            # (-2, 2, EntityType.LAUNCHER, Direction.CENTRE),
-            # (2, -2, EntityType.LAUNCHER, Direction.CENTRE),
-            # (-2, -2, EntityType.LAUNCHER, Direction.CENTRE),
-            (2,  0, EntityType.SPLITTER, Direction.WEST),
-            # ( 0,  2, EntityType.FOUNDRY, Direction.CENTRE)
-            (-2, 0, EntityType.SPLITTER, Direction.EAST),
-        ]
-        
         (ti, ax) = self.rc.get_global_resources()
-        if self.rc.get_current_round() > AXIONITE_ENABLE_ROUND and ti > 500:
-            plan.extend([
-                # (2, 2, EntityType.LAUNCHER, Direction.CENTRE),
-                # (-2, 2, EntityType.LAUNCHER, Direction.CENTRE),
-                # (2, -2, EntityType.LAUNCHER, Direction.CENTRE),
-                # (-2, -2, EntityType.LAUNCHER, Direction.CENTRE),
-                # ( 1,  2, EntityType.SPLITTER, Direction.NORTH),
-                # (-1,  2, EntityType.SPLITTER, Direction.NORTH),
+        if self.base_stage == 0:
+            if self.rc.get_current_round() > AXIONITE_ENABLE_ROUND and ti > 500:
+                self.base_stage = 1
+            p1 = Position(self.core_pos.x + 2, self.core_pos.y - 1)
+            p2 = Position(self.core_pos.x - 2, self.core_pos.y + 1)
+            if (is_in_map(p1, self.rc.get_map_width(), self.rc.get_map_height()) and self.rc.is_in_vision(p1) and get_building_type(self.rc, p1) == EntityType.FOUNDRY) or \
+                (is_in_map(p2, self.rc.get_map_width(), self.rc.get_map_height()) and self.rc.is_in_vision(p2) and get_building_type(self.rc, p2) == EntityType.FOUNDRY):
+                self.base_stage = 1
+        
+
+        if self.base_stage == 0:
+            return [
+                ( 2, 0, EntityType.SPLITTER, Direction.WEST),
+                (-2, 0, EntityType.SPLITTER, Direction.EAST),
+                ( 2, -1, EntityType.BARRIER, Direction.CENTRE),
+                (-2,  1, EntityType.BARRIER, Direction.CENTRE),
+            ]
+        elif self.base_stage == 1:
+            return [
+                ( 2,  0, EntityType.SPLITTER, Direction.WEST),
+                (-2,  0, EntityType.SPLITTER, Direction.EAST),
                 ( 2, -1, EntityType.FOUNDRY, Direction.CENTRE),
                 (-2,  1, EntityType.FOUNDRY, Direction.CENTRE),
-                # ( 1, -2, EntityType.SPLITTER, Direction.SOUTH),
-                # (-1, -2, EntityType.SPLITTER, Direction.SOUTH),
-            ])
-
-        return plan
+            ]
+        else: return []
 
     def verify_defences(self) -> bool:
         plan = self.get_defence_plan()
@@ -347,26 +361,32 @@ class BuilderBot(Bot):
                 pathfind.fast_pathfind_to(self.rc, target)
                 return False
             
+            if self.rc.get_position() == target and self.rc.is_tile_empty(target):
+                move_dir = get_empty_adj(self.rc, target)
+                new_pos = target.add(move_dir)
+                pathfind.fast_pathfind_to(self.rc, new_pos)
+
             if not self.rc.is_tile_empty(target):
                 if self.rc.can_destroy(target):
                     self.rc.destroy(target)
                 elif self.rc.can_fire(target):
                     self.rc.fire(target)
             
-            if self.rc.get_position() == target and self.rc.is_tile_empty(target):
-                move_dir = get_empty_adj(self.rc, target)
-                new_pos = target.add(move_dir)
-                pathfind.fast_pathfind_to(self.rc, new_pos)
-            
             if desired_type == EntityType.LAUNCHER:
                 # print('launcher????', file=sys.stderr)
                 if self.rc.can_build_launcher(target):
                     self.rc.build_launcher(target)
-                    return
+                    
             elif desired_type == EntityType.SPLITTER:
                 # print('splitter????', file=sys.stderr)
                 if self.rc.can_build_splitter(target, dir):
                     self.rc.build_splitter(target, dir)
+                    
+            elif desired_type == EntityType.BARRIER:
+                # print('splitter????', file=sys.stderr)
+                if self.rc.can_build_barrier(target):
+                    self.rc.build_barrier(target)
+                    
             elif desired_type == EntityType.FOUNDRY:
                 # print('splitter????', file=sys.stderr)
                 if self.rc.can_build_foundry(target):
@@ -638,7 +658,11 @@ class BuilderBot(Bot):
         if has_turret: return (False, None, Direction.CENTRE)
         
         if free_pos is not None:
+            # nearest_enemy = get_nearest_enemy(self.rc, free_pos)
+            # if nearest_enemy == -1:
             dir = pos.direction_to(free_pos).rotate_left().opposite()
+            # else:
+                # dir = free_pos.direction_to(self.rc.get_position(nearest_enemy))
             return (True, free_pos, dir)
         
         return (False, None, Direction.CENTRE)
