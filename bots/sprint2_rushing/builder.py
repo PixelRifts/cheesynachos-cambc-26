@@ -16,24 +16,24 @@ CORE_DANGER = 20
 
 base_stages = [
     [
-        ( 2, 0, EntityType.SPLITTER, Direction.WEST),
-        (-2, 0, EntityType.SPLITTER, Direction.EAST),
+        # ( 2, 0, EntityType.SPLITTER, Direction.WEST),
+        # (-2, 0, EntityType.SPLITTER, Direction.EAST),
         # ( 2,  1, EntityType.SENTINEL, Direction.NORTHEAST),
         # (-2, -1, EntityType.SENTINEL, Direction.SOUTHWEST),
-        ( 2,  1, EntityType.BARRIER, Direction.CENTRE),
-        (-2, -1, EntityType.BARRIER, Direction.CENTRE),
-        ( 2, -1, EntityType.BARRIER, Direction.CENTRE),
-        (-2,  1, EntityType.BARRIER, Direction.CENTRE),
+        # ( 2,  1, EntityType.BARRIER, Direction.CENTRE),
+        # (-2, -1, EntityType.BARRIER, Direction.CENTRE),
+        # ( 2, -1, EntityType.BARRIER, Direction.CENTRE),
+        # (-2,  1, EntityType.BARRIER, Direction.CENTRE),
     ],
     [
-        ( 2,  0, EntityType.SPLITTER, Direction.WEST),
-        (-2,  0, EntityType.SPLITTER, Direction.EAST),
+        # ( 2,  0, EntityType.SPLITTER, Direction.WEST),
+        # (-2,  0, EntityType.SPLITTER, Direction.EAST),
         # ( 2,  1, EntityType.SENTINEL, Direction.NORTHEAST),
         # (-2, -1, EntityType.SENTINEL, Direction.SOUTHWEST),
-        ( 2,  1, EntityType.BARRIER, Direction.CENTRE),
-        (-2, -1, EntityType.BARRIER, Direction.CENTRE),
-        ( 2, -1, EntityType.BARRIER, Direction.CENTRE),
-        (-2,  1, EntityType.BARRIER, Direction.CENTRE),
+        # ( 2,  1, EntityType.BARRIER, Direction.CENTRE),
+        # (-2, -1, EntityType.BARRIER, Direction.CENTRE),
+        # ( 2, -1, EntityType.BARRIER, Direction.CENTRE),
+        # (-2,  1, EntityType.BARRIER, Direction.CENTRE),
         # ( 0,  2, EntityType.BARRIER, Direction.CENTRE),
         # (-1,  2, EntityType.BARRIER, Direction.CENTRE),
         # ( 1,  2, EntityType.BARRIER, Direction.CENTRE),
@@ -48,6 +48,9 @@ class BotState(Enum):
     ECON_TARGET  = "Target"
     ECON_CONNECT = "Connect"
     ECON_NUKE    = "Nuke"
+
+    ATTACK_GOTO    = "Goto"
+    ATTACK_HIJACK  = "Hijack"
 
 
 class BuilderBot(Bot):
@@ -86,6 +89,8 @@ class BuilderBot(Bot):
         self.econ_protect_turret_loc = None
         self.econ_protect_turret_dir = Direction.CENTRE
         self.econ_protect_return_loc = self.rc.get_position()
+
+        self.attack_target: Position = None
         
         # Some states want sub-states
         self.state_custom_sub_state: int = 0
@@ -115,10 +120,20 @@ class BuilderBot(Bot):
                     self.rc.draw_indicator_dot(self.econ_connect_current_target, 255, 0, 255 if self.econ_connect_current_should_bridge else 0)
             case BotState.ECON_NUKE:
                 self.econ_nuke()
+            
+            case BotState.ATTACK_GOTO:
+                self.attack_goto()
+            case BotState.ATTACK_HIJACK:
+                self.attack_hijack()
     
     def econ_explore(self):
         # Defence Plan Guarantee
-        if not self.verify_defences():
+        # if not self.verify_defences():
+        #     return
+
+        if sense.ti_ever_increased():
+            self.switch_state(BotState.ATTACK_GOTO)
+            self.pathfind_target = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
             return
 
         # if self.state_turn_counter == 1:
@@ -193,7 +208,6 @@ class BuilderBot(Bot):
             self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
             self.econ_explore_dir = biased_random_dir(self.rc)
             self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
-        
 
     def econ_target(self):
         print('targeting', self.econ_target_ore, 'from', self.pathfind_target)
@@ -288,19 +302,16 @@ class BuilderBot(Bot):
             if self.econ_connect_current_should_bridge:
                 pathfind.fast_pathfind_to(self.rc, self.econ_connect_current_target)
             else:
-                # (got_to_target, preempted) = pathfind.preemptable_cardinal_pathfind_to(self.rc, self.econ_connect_current_target, True)
-                # self.econ_connect_current_run.append(self.rc.get_position())
-                # if got_to_target:
-                #     final_marked = got_to_target
-                # if preempted:
-                #     print('final one apparently')
-                #     self.switch_state(BotState.ECON_EXPLORE)
-                #     self.econ_explore_dir = biased_random_dir(self.rc)
-                #     self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
-                #     return
-                if pathfind.cardinal_pathfind_to(self.rc, self.econ_connect_current_target, True):
-                    final_marked = True
+                (got_to_target, preempted) = pathfind.preemptable_cardinal_pathfind_to(self.rc, self.econ_connect_current_target, True)
+                if got_to_target:
+                    final_marked = got_to_target
                 self.econ_connect_current_run.append(self.rc.get_position())
+                if preempted:
+                    print('final one apparently')
+                    self.switch_state(BotState.ECON_EXPLORE)
+                    self.econ_explore_dir = biased_random_dir(self.rc)
+                    self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+                    return
         else:
             bldg = self.rc.get_tile_building_id(self.rc.get_position())
             entt = get_building_type(self.rc, self.rc.get_position())
@@ -313,7 +324,7 @@ class BuilderBot(Bot):
                     self.rc.fire(self.rc.get_position())
                 
             (best_target, final_one, is_to_core) = self.compute_best_bridge_target(self.econ_target_is_ax)
-            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 3) or is_to_core)
+            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 2) or is_to_core)
 
             if self.econ_connect_current_should_bridge:
                 if self.rc.can_build_bridge(self.rc.get_position(), best_target):
@@ -333,7 +344,6 @@ class BuilderBot(Bot):
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
 
-
     def econ_nuke(self):
         if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
             if not is_in_map(self.pathfind_target, self.rc.get_map_width(), self.rc.get_map_height()) or not self.rc.is_in_vision(self.pathfind_target):
@@ -352,6 +362,82 @@ class BuilderBot(Bot):
                 self.econ_explore_dir = biased_random_dir(self.rc)
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
+
+    def attack_goto(self):
+        self.pathfind_target = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
+        
+        pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
+        if self.rc.is_in_vision(self.pathfind_target):
+            if get_building_type(self.rc, self.pathfind_target) != EntityType.CORE:
+                sense.eliminate_next_symmetry()
+        
+        if sense.sense_state.enemy_core_found is not None:
+            max_dist = -1000000
+            picked_bldg = None
+            for bldg in self.rc.get_nearby_buildings():
+                p = self.rc.get_position(bldg)
+                if not self.rc.is_in_vision(p): continue
+                entt = self.rc.get_entity_type(bldg)
+                allied = self.rc.get_team(bldg) == self.rc.get_team()
+                
+                bb_there = self.rc.get_tile_builder_bot_id(p)
+                if bb_there is not None and self.rc.get_team(bb_there) == self.rc.get_team(): continue
+                
+                if is_enemy_transport(self.rc, p):
+                    d_to_me = p.distance_squared(self.rc.get_position())
+                    d_to_core = p.distance_squared(self.enemy_core_pos)
+                    if d_to_me > max_dist and (d_to_core <= GameConstants.SENTINEL_VISION_RADIUS_SQ + 1):
+                        max_dist = d_to_me
+                        picked_bldg = p
+                elif entt == EntityType.HARVESTER:
+                    # TODO
+                    pass
+            
+            if picked_bldg is not None:
+                self.switch_state(BotState.ATTACK_HIJACK)
+                self.attack_target = picked_bldg
+                return
+    
+    def attack_hijack(self):
+        
+        if self.state_custom_sub_state == 0:
+            print('0 going to', self.attack_target)
+
+            if self.rc.is_in_vision(self.attack_target):
+                bb_there = self.rc.get_tile_builder_bot_id(self.attack_target)
+                if bb_there is not None and self.rc.get_team(bb_there) == self.rc.get_team():
+                    self.switch_state(BotState.ATTACK_GOTO)
+                    self.pathfind_target = self.enemy_core_pos
+                    return
+
+            if pathfind.fast_pathfind_to(self.rc, self.attack_target):
+                self.state_custom_sub_state = 1
+
+        elif self.state_custom_sub_state == 1:
+            print('1 firing at', self.attack_target)
+            if not self.rc.is_tile_empty(self.attack_target):
+                if self.rc.can_destroy(self.attack_target):
+                    self.rc.destroy(self.attack_target)
+                if self.rc.can_fire(self.attack_target):
+                    self.rc.fire(self.attack_target)
+            else:
+                self.pathfind_target = self.rc.get_position().add(get_empty_adj_with_diag(self.rc, self.rc.get_position()))
+                self.state_custom_sub_state = 2
+        elif self.state_custom_sub_state == 2:
+            print('2 going to', self.pathfind_target)
+            if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
+                self.state_custom_sub_state = 3
+        elif self.state_custom_sub_state == 3:
+            print('3 sentinal at', self.attack_target)
+            dir = self.attack_target.direction_to(self.enemy_core_pos)
+            if self.rc.can_build_sentinel(self.attack_target, dir):
+                self.rc.build_sentinel(self.attack_target, dir)
+            else:
+                self.switch_state(BotState.ATTACK_GOTO)
+                self.pathfind_target = self.enemy_core_pos
+        else:
+            self.switch_state(BotState.ATTACK_GOTO)
+            self.pathfind_target = self.enemy_core_pos
 
 
     def end_turn(self):
@@ -429,7 +515,7 @@ class BuilderBot(Bot):
                 if self.enemy_core_pos is not None:
                     dir = target.direction_to(self.enemy_core_pos)
                 else:
-                    temp_enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), guess_symmetry(self.rc.get_map_width(), self.rc.get_map_height()))
+                    temp_enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
                     dir = target.direction_to(temp_enemy_core_pos)
 
                 if self.rc.can_build_sentinel(target, dir):
@@ -638,7 +724,6 @@ class BuilderBot(Bot):
         print('track4', best if best is not None else start, build_finish)
         return (best if best is not None else start, build_finish, False)
     
-
     def should_connect_to_ore(self, pos: Position, is_ax: bool) -> (bool, Direction):
         if pos is None: return (False, Direction.CENTRE)
         
@@ -717,7 +802,7 @@ class BuilderBot(Bot):
             if self.enemy_core_pos is not None and pos.distance_squared(self.enemy_core_pos) < GameConstants.SENTINEL_VISION_RADIUS_SQ:
                 dir = free_pos.direction_to(self.enemy_core_pos)
             else:
-                temp_enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), guess_symmetry(self.rc.get_map_width(), self.rc.get_map_height()))
+                temp_enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
                 dir = free_pos.direction_to(temp_enemy_core_pos)
                 # dir = pos.direction_to(free_pos).rotate_left().opposite()
             if dir == best_dir.opposite(): dir = dir.rotate_left()

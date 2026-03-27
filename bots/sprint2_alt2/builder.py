@@ -119,6 +119,7 @@ class BuilderBot(Bot):
             next_pos = self.rc.get_position().add(self.econ_explore_dir)
             if not pathfind.is_in_map(next_pos, self.rc.get_map_width(), self.rc.get_map_height()):
                 self.econ_explore_dir = biased_random_dir(self.rc)
+                self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
             if self.rc.can_move(self.econ_explore_dir):
                 self.rc.move(self.econ_explore_dir)
@@ -129,11 +130,15 @@ class BuilderBot(Bot):
                         self.rc.move(self.econ_explore_dir)
             else:
                 self.econ_explore_dir = biased_random_dir(self.rc)
-        else:
-            if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
-                self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
-                self.econ_explore_dir = biased_random_dir(self.rc)
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+        else:
+            try:
+                if pathfind.fast_pathfind_to(self.rc, self.pathfind_target):
+                    self.econ_explore_timeout = BOT_EXPLORE_TIMEOUT
+                    self.econ_explore_dir = biased_random_dir(self.rc)
+                    self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+            except ValueError:
+                print(self.pathfind_target, file=sys.stderr)
         
 
     def econ_target(self):

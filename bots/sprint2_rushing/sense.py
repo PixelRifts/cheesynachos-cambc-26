@@ -48,14 +48,7 @@ class SenseState:
         self.min_enemy_transport_dist = 1000000
 
         self.enemy_core_found: Position = None
-
-        if self.width > self.height:
-            self.symmetries_possible = [ Symmetry.VERTICAL, Symmetry.ROTATIONAL, Symmetry.HORIZONTAL ]
-        elif self.width < self.height:
-            self.symmetries_possible = [  Symmetry.HORIZONTAL, Symmetry.ROTATIONAL, Symmetry.VERTICAL ]
-        else:
-            self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
-
+        self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
         self.grid: List[List[Optional[int]]] = [
             [None for _ in range(self.width)] 
             for _ in range(self.height)
@@ -69,6 +62,7 @@ class SenseState:
     def reset_frame(self, rc: Controller):
         self.nearest_enemy_transport: Position = None
         self.min_enemy_transport_dist = 1000000
+        self.am_seeing_sentinel = False
 
 sense_state = SenseState()
 
@@ -92,6 +86,9 @@ def update_tile(rc: Controller, pos: Position):
                 if d < sense_state.min_enemy_transport_dist:
                     sense_state.min_enemy_transport_dist = d
                     sense_state.nearest_enemy_transport = pos
+        else:
+            if entt == EntityType.SENTINEL:
+                sense_state.am_seeing_sentinel = True
 
     env = rc.get_tile_env(pos)
     dist = rc.get_position().distance_squared(pos)
@@ -118,7 +115,3 @@ def ti_ever_increased() -> bool:
         prev = cur
 
     return False
-
-def eliminate_next_symmetry():
-    if len(sense_state.symmetries_possible) > 1:
-        del sense_state.symmetries_possible[0]

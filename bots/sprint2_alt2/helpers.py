@@ -89,6 +89,7 @@ def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> P
         steps_y = float('inf')
 
     steps = min(steps_x, steps_y)
+    if math.isinf(steps): return pos
     return Position(pos.x + dx * steps, pos.y + dy * steps)
 
 # Quick entity checks
