@@ -94,6 +94,7 @@ class BuilderBot(Bot):
         self.econ_protect_turret_loc = None
         self.econ_protect_turret_dir = Direction.CENTRE
         self.econ_protect_return_loc = self.rc.get_position()
+        self.econ_connect_came_from_placement: bool = False
 
         self.attack_target: Position = None
         self.attack_replace_blacklist = set()
@@ -281,6 +282,7 @@ class BuilderBot(Bot):
     def econ_connect(self):
         # Place a launcher to protect this place
         if self.state_custom_sub_state == 10:
+            self.econ_connect_came_from_placement = True
             print("hello - ")
             if try_destroy(self.rc, self.rc.get_position(), self.econ_connect_launcher_where):
                 print("it's empty - ")
@@ -300,6 +302,7 @@ class BuilderBot(Bot):
         
         # TODO maybe remove
         if self.state_custom_sub_state != 0: return
+        print('bye')
 
         final_marked = False
         if self.econ_connect_current_target is not None and self.rc.get_position() != self.econ_connect_current_target:
@@ -317,16 +320,18 @@ class BuilderBot(Bot):
                     self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                     return
         else:
-            bldg = self.rc.get_tile_building_id(self.rc.get_position())
-            entt = get_building_type(self.rc, self.rc.get_position())
-            allied = self.rc.get_team(bldg) == self.rc.get_team()
-            already_connected = False
-            if allied and (entt == EntityType.ROAD or entt == EntityType.CONVEYOR or entt == EntityType.BRIDGE):
-                self.rc.destroy(self.rc.get_position())
-            elif not allied:
-                if self.rc.can_fire(self.rc.get_position()):
-                    self.rc.fire(self.rc.get_position())
-            
+            if not self.econ_connect_came_from_placement:
+                bldg = self.rc.get_tile_building_id(self.rc.get_position())
+                entt = get_building_type(self.rc, self.rc.get_position())
+                allied = self.rc.get_team(bldg) == self.rc.get_team()
+                already_connected = False
+                if allied and (entt == EntityType.ROAD or entt == EntityType.CONVEYOR or entt == EntityType.BRIDGE):
+                    self.rc.destroy(self.rc.get_position())
+                elif not allied:
+                    if self.rc.can_fire(self.rc.get_position()):
+                        self.rc.fire(self.rc.get_position())
+            self.econ_connect_came_from_placement = False
+
             (best_target, final_one, is_to_core) = self.compute_best_bridge_target(self.econ_target_is_ax)
             self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 2) or is_to_core)
 
