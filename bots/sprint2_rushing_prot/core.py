@@ -25,7 +25,7 @@ class Core(Bot):
                     self.bias_dir = self.rc.get_position().direction_to(t)
 
     def turn(self):
-        threshold = 1 #+ self.rc.get_current_round() // 80
+        threshold = 2 #+ self.rc.get_current_round() // 80
         if self.ti_ever_increased():
             threshold = 4 + self.rc.get_current_round() // 80
 

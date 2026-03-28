@@ -72,12 +72,17 @@ class BuilderBot(Bot):
         self.enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
         # self.econ_tracked_ore = set()
         self.base_stage = 0
-        self.rusher = self.rc.get_position() != self.core_pos
+        
+        self.rusher = self.rc.get_unit_count() > 2
 
-        self.switch_state(BotState.ECON_EXPLORE)
-        self.econ_explore_dir = self.core_pos.direction_to(self.rc.get_position())
-        if self.econ_explore_dir == Direction.CENTRE: self.econ_explore_dir = biased_random_dir(self.rc)
-        self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+        if not self.rusher:
+            self.switch_state(BotState.ECON_EXPLORE)
+            self.econ_explore_dir = self.core_pos.direction_to(self.rc.get_position())
+            if self.econ_explore_dir == Direction.CENTRE: self.econ_explore_dir = biased_random_dir(self.rc)
+            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+        else:
+            self.switch_state(BotState.ATTACK_GOTO)
+            self.pathfind_target = self.enemy_core_pos
 
     def reset_state_variables(self):
         self.pathfind_target: Position = None
@@ -110,9 +115,9 @@ class BuilderBot(Bot):
     def start_turn(self):
         sense.update_sense(self.rc)
         print(sense.sense_state.symmetries_possible)
-        if self.enemy_core_pos is None and sense.sense_state.enemy_core_found is not None:
+        if sense.sense_state.enemy_core_found is not None:
             self.enemy_core_pos = sense.sense_state.enemy_core_found
-        if len(sense.sense_state.symmetries_possible) == 1 and self.enemy_core_pos is None:
+        else:
             self.enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
     
     def turn(self):
@@ -140,7 +145,7 @@ class BuilderBot(Bot):
         # if not self.verify_defences():
         #     return
 
-        if self.rusher and sense.ti_ever_increased():
+        if self.rusher:
             self.switch_state(BotState.ATTACK_GOTO)
             self.pathfind_target = self.enemy_core_pos
             return
