@@ -69,7 +69,7 @@ def recompute_fast_virtual_target(rc: Controller):
     # print("Round", rc.get_current_round(), file=sys.stderr)
     
     steps = 0
-    while rc.is_in_vision(current) and steps < 5:
+    while rc.is_in_vision(current) and steps < 4:
         # Stop if reached goal
         if current == pf_state.final_target:
             break

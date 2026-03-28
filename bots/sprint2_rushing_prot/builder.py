@@ -73,7 +73,10 @@ class BuilderBot(Bot):
         # self.econ_tracked_ore = set()
         self.base_stage = 0
         
-        self.rusher = self.rc.get_unit_count() > 2
+        if rc.get_current_round() == 1:
+            self.rusher = False
+        else:
+            self.rusher = True
 
         if not self.rusher:
             self.switch_state(BotState.ECON_EXPLORE)
@@ -183,7 +186,6 @@ class BuilderBot(Bot):
 
         if sense.sense_state.nearest_enemy_transport is not None:
             if self.rc.get_current_round() > NUKE_WAIT_FOR or sense.sense_state.nearest_enemy_transport.distance_squared(self.core_pos) < CORE_DANGER:
-                print('nuking')
                 self.switch_state(BotState.ECON_NUKE)
                 self.pathfind_target = sense.sense_state.nearest_enemy_transport
 
@@ -288,14 +290,11 @@ class BuilderBot(Bot):
         # Place a launcher to protect this place
         if self.state_custom_sub_state == 10:
             self.econ_connect_came_from_placement = True
-            print("hello - ")
+            
             if try_destroy(self.rc, self.rc.get_position(), self.econ_connect_launcher_where):
-                print("it's empty - ")
                 if self.rc.can_build_launcher(self.econ_connect_launcher_where):
                     self.rc.build_launcher(self.econ_connect_launcher_where)
                     self.state_custom_sub_state = 0
-                else:
-                    print('but couldnt build')
             else:
                 return
 
@@ -307,7 +306,6 @@ class BuilderBot(Bot):
         
         # TODO maybe remove
         if self.state_custom_sub_state != 0: return
-        print('bye')
 
         final_marked = False
         if self.econ_connect_current_target is not None and self.rc.get_position() != self.econ_connect_current_target:
@@ -801,7 +799,7 @@ class BuilderBot(Bot):
         
         (ti, ax) = self.rc.get_global_resources()
         if is_ax:
-            if ti < 300 or self.rc.get_current_round() < AXIONITE_ENABLE_ROUND:
+            if ti < 300 or self.rc.get_current_round() < AXIONITE_ENABLE_ROUND or not sense.ti_ever_increased():
                 return (False, Direction.CENTRE)
         if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
         
