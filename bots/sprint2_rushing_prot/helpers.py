@@ -179,7 +179,7 @@ def try_destroy(rc: Controller, me: Position, p: Position) -> bool:
 
     if allied:
         if rc.get_position() == p:
-            pathfind.fast_pathfind_to(rc, get_best_empty_adj(rc, p, me))
+            pathfind.fast_pathfind_to(rc, p.add(get_best_empty_adj(rc, p, me)))
         if not is_adjacent_with_diag(rc.get_position(), p):
             pathfind.fast_pathfind_to(rc, p)
         if rc.can_destroy(p):
@@ -189,6 +189,7 @@ def try_destroy(rc: Controller, me: Position, p: Position) -> bool:
             pathfind.fast_pathfind_to(rc, p)
         if rc.can_fire(p):
             rc.fire(p)
+    return False
         
 
 # Adjacency Checks
@@ -210,15 +211,21 @@ def manhattan_distance(a: Position, b: Position) -> int:
     dy = abs(a.y - b.y)
     return dx + dy
 
-def get_placable_adj_with_diag(rc: Controller, a: Position) -> Direction:
+def get_best_placable_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
     for d in DIRECTIONS:
         p = a.add(d)
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue
         bb = rc.get_tile_builder_bot_id(p)
         if bb is not None: continue
-        if is_pos_turretable(rc, p) and not is_enemy_transport(rc, p): return d
-    return Direction.CENTRE
+        if not (is_pos_turretable(rc, p) and not is_enemy_transport(rc, p)): continue
+        dist = p.distance_squared(b)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
 
 def get_empty_adj_with_diag(rc: Controller, a: Position) -> Direction:
     for d in DIRECTIONS:
@@ -245,6 +252,23 @@ def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
     best_dist = 1000000
     best_dir = Direction.CENTRE
     for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not is_pos_pathable(rc, p): continue
+        if is_friendly_transport(rc, p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        dist = p.distance_squared(b)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
+def get_best_empty_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
         p = a.add(d)
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue
