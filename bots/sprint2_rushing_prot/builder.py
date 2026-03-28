@@ -248,7 +248,8 @@ class BuilderBot(Bot):
                 if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()): continue
                 if not self.rc.is_in_vision(adj): continue
 
-                if get_building_type(self.rc, adj) == EntityType.BARRIER or is_friendly_transport(self.rc, adj):
+                if get_building_type(self.rc, adj) == EntityType.BARRIER or is_friendly_transport(self.rc, adj) or \
+                    self.rc.get_tile_env(adj) == Environment.WALL:
                     valid_count += 1
                 else:
                     if try_destroy(self.rc, self.econ_target_ore, adj):
