@@ -465,6 +465,7 @@ class BuilderBot(Bot):
 
         elif self.state_custom_sub_state == 1:
             print('1 firing at', self.attack_target)
+            if not self.rc.is_in_vision(self.attack_target): return
             if not self.rc.is_tile_empty(self.attack_target):
                 if self.rc.can_destroy(self.attack_target):
                     self.rc.destroy(self.attack_target)

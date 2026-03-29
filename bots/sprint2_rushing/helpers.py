@@ -179,7 +179,7 @@ def try_destroy(rc: Controller, me: Position, p: Position) -> bool:
 
     if allied:
         if rc.get_position() == p:
-            pathfind.fast_pathfind_to(rc, get_best_empty_adj(rc, p, me))
+            pathfind.fast_pathfind_to(rc, p.add(get_best_empty_adj(rc, p, me)))
         if not is_adjacent_with_diag(rc.get_position(), p):
             pathfind.fast_pathfind_to(rc, p)
         if rc.can_destroy(p):

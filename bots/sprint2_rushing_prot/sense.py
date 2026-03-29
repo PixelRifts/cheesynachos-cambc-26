@@ -114,7 +114,7 @@ def update_tile(rc: Controller, pos: Position):
         allied = rc.get_team(bldg) == rc.get_team()
         if not allied:
             if entt == EntityType.CORE:
-                sense_state.enemy_core_found = pos
+                sense_state.enemy_core_found = rc.get_position(bldg)
             elif entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE:
                 d = pos.distance_squared(rc.get_position())
                 if d < sense_state.min_enemy_transport_dist:

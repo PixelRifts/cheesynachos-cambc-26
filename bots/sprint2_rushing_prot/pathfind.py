@@ -1,7 +1,7 @@
 import sys
 import sense
 
-from helpers import is_friendly_transport, manhattan_distance, is_pos_pathable, degrees_between, cardinal_direction_to, is_in_map, is_adjacent, is_adjacent_with_diag, DIRECTIONS, CARDINAL_DIRECTIONS, DIRECTIONS_ORDERED_CARDINALS_FIRST
+from helpers import get_building_type, is_friendly_transport, manhattan_distance, is_pos_pathable, degrees_between, cardinal_direction_to, is_in_map, is_adjacent, is_adjacent_with_diag, DIRECTIONS, CARDINAL_DIRECTIONS, DIRECTIONS_ORDERED_CARDINALS_FIRST
 from collections import deque
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
 
@@ -69,7 +69,7 @@ def recompute_fast_virtual_target(rc: Controller):
     # print("Round", rc.get_current_round(), file=sys.stderr)
     
     steps = 0
-    while rc.is_in_vision(current) and steps < 4:
+    while rc.is_in_vision(current) and steps < 3:
         # Stop if reached goal
         if current == pf_state.final_target:
             break
@@ -630,14 +630,20 @@ def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Dir
 def virtually_navvable(rc: Controller, pos: Position) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
         return False
-    return ((rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos))
+    is_friendly_barrier = False
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is not None:
+        allied = rc.get_team(bldg) == rc.get_team()
+        if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
+            is_friendly_barrier = True
+    return ((rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos) or is_friendly_barrier)
 
 def should_destroy(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     if bldg is None: return False
     entt = rc.get_entity_type(bldg)
     # TODO maybe add more things that should be destroyed here
-    return entt == EntityType.MARKER
+    return entt == EntityType.MARKER or entt == EntityType.BARRIER
 
 def actually_navvable(rc: Controller, pos: Position) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):

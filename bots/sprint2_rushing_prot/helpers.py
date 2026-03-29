@@ -103,6 +103,15 @@ def is_friendly_transport(rc: Controller, pos: Position) -> bool:
     entt = rc.get_entity_type(bldg)
     return allied and (entt == EntityType.CONVEYOR or entt == EntityType.SPLITTER or entt == EntityType.BRIDGE)
 
+def is_friendly_turret(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return False
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return False
+    allied = rc.get_team(bldg) == rc.get_team()
+    entt = rc.get_entity_type(bldg)
+    return allied and (entt == EntityType.SENTINEL or entt == EntityType.GUNNER or entt == EntityType.LAUNCHER or entt == EntityType.BREACH)
+
+
 def is_enemy_transport(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return False
     bldg = rc.get_tile_building_id(pos)
@@ -169,6 +178,10 @@ def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
     return False
 
 def try_destroy(rc: Controller, me: Position, p: Position) -> bool:
+    if not rc.is_in_vision(p):
+        pathfind.fast_pathfind_to(rc, me)
+        return
+    
     bldg = rc.get_tile_building_id(p)
     if bldg is None:
         return pathfind.fast_pathfind_to(rc, me)
@@ -184,6 +197,7 @@ def try_destroy(rc: Controller, me: Position, p: Position) -> bool:
             pathfind.fast_pathfind_to(rc, p)
         if rc.can_destroy(p):
             rc.destroy(p)
+            print('try_destroy destroyed', p)
     elif not allied:
         if rc.get_position() != p:
             pathfind.fast_pathfind_to(rc, p)

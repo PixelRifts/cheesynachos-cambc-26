@@ -12,6 +12,7 @@ class Core(Bot):
         self.count = 0
         self.ti_tracker = deque(maxlen=24)
         self.bias_dir = None
+        self.spawned_healer = False
 
     def start_turn(self):
         (ti, ax) = self.rc.get_global_resources()
@@ -30,8 +31,9 @@ class Core(Bot):
             threshold = 4 + self.rc.get_current_round() // 80
 
         if self.count < threshold:
-            if random.randint(0, 9) < 2:
+            if threshold > 2 and not self.spawned_healer:
                 spawn_pos = self.rc.get_position()
+                self.spawned_healer = True
             else:
                 if self.bias_dir is not None:
                     spawn_pos = self.rc.get_position().add(self.bias_dir)
