@@ -9,6 +9,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 class PFState:
     def __init__(self):
         self.reset()
+        self.should_guess_rotation = True
         
     def reset(self):
         self.virtual_target = Position(0, 0)
@@ -16,13 +17,13 @@ class PFState:
         self.should_bug = False
         self.best_bug_dist = float('inf')
         self.bug_dir = None
-        self.should_guess_rotation = True
         self.clockwise = False
         self.bug_cooldown = 4
         self.validate = False
 
 pf_state = PFState()
 
+import inspect
 
 # This is a 2 tier-ed approach, that I implemented for MIT Battlecode translated to python
 # Could have bugs, subject to change
@@ -30,6 +31,7 @@ def fast_pathfind_to(rc: Controller, target: Position):
     global pf_state
 
     if pf_state.final_target != target:
+        # print('reset virtual target', pf_state.final_target, target)
         pf_state.reset()
         pf_state.final_target = target
         pf_state.virtual_target = rc.get_position()
@@ -43,19 +45,12 @@ def fast_pathfind_to(rc: Controller, target: Position):
             return True
 
     if rc.get_position() == pf_state.virtual_target:
-        pf_state.bug_cooldown = 4
         recompute_fast_virtual_target(rc)
-    else:
-        pf_state.bug_cooldown -= 1
     
-    if pf_state.bug_cooldown <= 0:
-        pf_state.virtual_target = rc.get_position()
-        pf_state.should_bug = False
-        return False
-
     fast_pathfind_to_virtual(rc)
     if rc.get_position() == target:
         return True
+    rc.draw_indicator_line(rc.get_position(), pf_state.virtual_target, 255, 255, 255)
     
     # rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
     return False
@@ -65,15 +60,13 @@ def recompute_fast_virtual_target(rc: Controller):
     global pf_state
 
     current: Position = pf_state.virtual_target
-
-    # print("Round", rc.get_current_round(), file=sys.stderr)
     
     steps = 0
     while rc.is_in_vision(current) and steps < 3:
         # Stop if reached goal
         if current == pf_state.final_target:
             break
-        # print("Iter --", current, file=sys.stderr)
+        print("Iter --", current)
 
         steps += 1
 
@@ -123,26 +116,32 @@ def recompute_fast_virtual_target(rc: Controller):
 
             if current_loc is not None:
                 if not is_in_map(current_loc, rc.get_map_width(), rc.get_map_height()):
-                    break
+                    pf_state.bug_dir = pf_state.bug_dir.opposite()
+                    continue
                 assert current_loc != current
                 current = current_loc
                 pf_state.bug_dir = pf_state.bug_dir.rotate_right() if not pf_state.clockwise else pf_state.bug_dir.rotate_left()
                 d = current.distance_squared(pf_state.final_target)
                 if d < pf_state.best_bug_dist:
                     pf_state.should_bug = False
+                    # print('exit bugmode')
 
-            # print("Bug mode: ", current, file=sys.stderr)
+            # print("Bug mode: ", current)
         else:
             # Greedy
-            closest = current.distance_squared(pf_state.final_target)
+            direct_action = current.direction_to(pf_state.final_target)
             best = current
-            for d in DIRECTIONS:
-                if virtually_navvable(rc, current.add(d)):
-                    nxt = current.add(d)
-                    dist = nxt.distance_squared(pf_state.final_target)
-                    if dist < closest:
-                        closest = dist
-                        best = nxt
+            if virtually_navvable(rc, current.add(direct_action)):
+                best = current.add(direct_action)
+            # closest = current.distance_squared(pf_state.final_target)
+            # best = current
+            # for d in DIRECTIONS:
+            #     if virtually_navvable(rc, current.add(d)):
+            #         nxt = current.add(d)
+            #         dist = nxt.distance_squared(pf_state.final_target)
+            #         if dist < closest:
+            #             closest = dist
+            #             best = nxt
 
             if not rc.is_in_vision(best):
                 break
@@ -155,13 +154,12 @@ def recompute_fast_virtual_target(rc: Controller):
                 pf_state.bug_dir = current.direction_to(pf_state.final_target)
                 pf_state.should_guess_rotation = False
             
-            # print("Greedy: ", current, file=sys.stderr)
+            # print("Greedy: ", current)
         
-        rc.draw_indicator_dot(current, 50, 180, 50)
+        # rc.draw_indicator_dot(current, 50, 180, 50)
     
     pf_state.virtual_target = current
     # print(pf_state.virtual_target, file=sys.stderr)
-    rc.draw_indicator_dot(pf_state.virtual_target, 50, 255, 50)
 
 
 def fast_pathfind_to_virtual(rc: Controller):
@@ -280,7 +278,7 @@ def recompute_cardinal_virtual_target(rc: Controller):
         # Stop if reached goal
         if current == pf_state.final_target:
             break
-        # print("Iter --", current, file=sys.stderr)
+        print("Iter --", current)
 
         steps += 1
 
@@ -346,7 +344,7 @@ def recompute_cardinal_virtual_target(rc: Controller):
                 if d < pf_state.best_bug_dist:
                     pf_state.should_bug = False
 
-            # print("Bug mode: ", current, file=sys.stderr)
+            # print("Bug mode: ", current)
         else:
             # Greedy
             closest = current.distance_squared(pf_state.final_target)
@@ -368,9 +366,8 @@ def recompute_cardinal_virtual_target(rc: Controller):
                 pf_state.should_bug = True
                 pf_state.best_bug_dist = current.distance_squared(pf_state.final_target)
                 pf_state.bug_dir = cardinal_direction_to(current, pf_state.final_target)
-                pf_state.should_guess_rotation = False
             
-            # print("Greedy: ", current, file=sys.stderr)
+            # print("Greedy: ", current)
         
         rc.draw_indicator_dot(current, 50, 180, 50)
     

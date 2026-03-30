@@ -401,7 +401,7 @@ class BuilderBot(Bot):
             self.econ_connect_came_from_placement = False
 
             (best_target, final_one, is_to_core) = self.compute_best_bridge_target(self.econ_target_is_ax)
-            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 2) or is_to_core)
+            self.econ_connect_current_should_bridge = (not pathfind.is_tile_within_n_cardinal_steps(self.rc, self.rc.get_position(), best_target, 3) or is_to_core)
 
             if not self.is_launcher_protected(self.rc.get_position()):
                 self.state_custom_sub_state = 10
@@ -559,7 +559,7 @@ class BuilderBot(Bot):
             return
 
         if not self.rc.is_in_vision(self.attack_target):
-            pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
+            pathfind.fast_pathfind_to(self.rc, pathfind.pf_state.final_target)
             return
 
         if get_building_type(self.rc, self.attack_target) != EntityType.SENTINEL:
