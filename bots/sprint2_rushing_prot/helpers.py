@@ -204,7 +204,7 @@ def try_destroy(rc: Controller, me: Position, p: Position) -> bool:
         if rc.can_fire(p):
             rc.fire(p)
     return False
-        
+
 
 # Adjacency Checks
 

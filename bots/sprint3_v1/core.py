@@ -27,7 +27,7 @@ class Core(Bot):
 
     def turn(self):
         threshold = 2 #+ self.rc.get_current_round() // 80
-        if self.ti_ever_increased():
+        if self.rc.get_current_round() > 100:
             threshold = 4 + self.rc.get_current_round() // 80
 
         if self.count < threshold:

@@ -161,7 +161,8 @@ class BuilderBot(Bot):
                 self.attack_block_ore()
             case BotState.ATTACK_HIJACK:
                 self.attack_hijack()
-    
+
+
     def econ_explore(self):
         # Defence Plan Guarantee
         # if not self.verify_defences():
@@ -957,10 +958,3 @@ class BuilderBot(Bot):
 
         return not_enough_info
         
-    # def ore_is_hijacked(self, pos: Position) -> (bool, Direction):
-    #     if pos is None: return (False, Direction.CENTRE)
-    #     if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
-        
-    #     has_harvester = get_building_type(self.rc, pos) == EntityType.HARVESTER
-    #     if not has_harvester: return (False, Direction.CENTRE)
-        # for d in CARDINAL_DIRECTIONS:
