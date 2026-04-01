@@ -1,576 +1,304 @@
 import sys
-import sense
 
+from sense import Sense
 from helpers import *
 from collections import deque
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
 
 # Implement BUG + BFS Pathfinding
+from heapq import heappush, heappop
+
+BARRIER_COST = 10
+
 class PFState:
     def __init__(self):
         self.reset()
-        self.should_guess_rotation = True
-        
+
     def reset(self):
-        self.virtual_target = Position(0, 0)
-        self.final_target = Position(0, 0)
-        self.should_bug = False
-        self.best_bug_dist = float('inf')
-        self.bug_dir = None
-        self.clockwise = False
-        self.bug_cooldown = 4
-        self.validate = False
+        # incremental A*
+        self.astar_active = False
+        self.goal = None
+
+        self.open_set = []
+        self.came_from = {}
+        self.g_score = {}
+
+        self.result_path = []
+
 
 pf_state = PFState()
 
-# This is a 2 tier-ed approach, that I implemented for MIT Battlecode translated to python
-# Could have bugs, subject to change
-def fast_pathfind_to(rc: Controller, target: Position):
-    global pf_state
+# Fast Pathfind
 
-    if pf_state.final_target != target:
+def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
+    cur = rc.get_position()
+    if cur == target: return True
+
+    # start / restart A*
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target:
         pf_state.reset()
-        pf_state.final_target = target
-        pf_state.virtual_target = rc.get_position()
-        
-    if rc.get_position() == target:
-        return True
+        pf_state.astar_active = True
+        pf_state.goal = target
 
-    if rc.get_position().distance_squared(target) == 1:
-        if rc.can_move(rc.get_position().direction_to(target)):
-            rc.move(rc.get_position().direction_to(target))
-            return True
+        pf_state.g_score[cur] = 0
+        heappush(pf_state.open_set, (0, cur))
 
-    if rc.get_position() == pf_state.virtual_target:
-        recompute_fast_virtual_target(rc)
-    
-    fast_pathfind_to_virtual(rc)
-    if rc.get_position() == target:
-        return True
-    
-    # rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
-    return False
+    # continue A* for a limited budget
+    if pf_state.astar_active:
+        step_astar_internal(rc, sense, max_expansions=50)
 
+    if pf_state.result_path:
+        # follow path it
+        next_pos = pf_state.result_path[0]
+        d = cur.direction_to(next_pos)
 
-def recompute_fast_virtual_target(rc: Controller):
-    global pf_state
-
-    current: Position = pf_state.virtual_target
-    
-    steps = 0
-    while rc.is_in_vision(current) and steps < 3:
-        # Stop if reached goal
-        if current == pf_state.final_target:
-            break
-
-        steps += 1
-
-        if pf_state.should_bug:
-            # Run Bug 1.5
-
-            # Guess which way to turn while circumnavving
-            if pf_state.should_guess_rotation:
-                pf_state.should_guess_rotation = False
-
-                dirL: Direction = pf_state.bug_dir
-                for _ in range(8):
-                    if virtually_navvable(rc, current.add(dirL)):
-                        break
-                    dirL = dirL.rotate_left()
-                locL = current.add(dirL)
-                
-                dirR = pf_state.bug_dir
-                for _ in range(8):
-                    if virtually_navvable(rc, current.add(dirR)):
-                        break
-                    dirR = dirR.rotate_right()
-                locR = current.add(dirR)
-
-                pf_state.clockwise = locL.distance_squared(pf_state.final_target) >= locR.distance_squared(pf_state.final_target)
-
-            # Try to find wall-follow dir
-            current_loc: Position = None
-            new_loc: Position = current.add(pf_state.bug_dir)
-            if virtually_navvable(rc, new_loc):
-                current_loc = new_loc
-            else:
-                break_flag = False
-                for _ in range(8):
-                    new_loc = current.add(pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left())
-                    if virtually_navvable(rc, new_loc):
-                        current_loc = new_loc
-                        break
-                    elif not is_in_map(new_loc, rc.get_map_width(), rc.get_map_height()):
-                        pf_state.clockwise = not pf_state.clockwise
-                        break_flag = True
-                        break
-                    pf_state.bug_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
-
-                if break_flag:
-                    break
-
-            if current_loc is not None:
-                if not is_in_map(current_loc, rc.get_map_width(), rc.get_map_height()):
-                    pf_state.bug_dir = pf_state.bug_dir.opposite()
-                    continue
-                assert current_loc != current
-                current = current_loc
-                pf_state.bug_dir = pf_state.bug_dir.rotate_right() if not pf_state.clockwise else pf_state.bug_dir.rotate_left()
-                d = current.distance_squared(pf_state.final_target)
-                if d < pf_state.best_bug_dist:
-                    pf_state.should_bug = False
-
-            # print("Bug mode: ", current)
-        else:
-            # Greedy
-            direct_action = current.direction_to(pf_state.final_target)
-            best = current
-            if virtually_navvable(rc, current.add(direct_action)):
-                best = current.add(direct_action)
-            # closest = current.distance_squared(pf_state.final_target)
-            # best = current
-            # for d in DIRECTIONS:
-            #     if virtually_navvable(rc, current.add(d)):
-            #         nxt = current.add(d)
-            #         dist = nxt.distance_squared(pf_state.final_target)
-            #         if dist < closest:
-            #             closest = dist
-            #             best = nxt
-
-            if not rc.is_in_vision(best):
-                break
-            
-            if best != current:
-                current = best
-            else:
-                pf_state.should_bug = True
-                pf_state.best_bug_dist = current.distance_squared(pf_state.final_target)
-                pf_state.bug_dir = current.direction_to(pf_state.final_target)
-                pf_state.should_guess_rotation = False
-            
-            # print("Greedy: ", current)
-        
-        # rc.draw_indicator_dot(current, 50, 180, 50)
-    
-    pf_state.virtual_target = current
-    # print(pf_state.virtual_target, file=sys.stderr)
-
-
-def fast_pathfind_to_virtual(rc: Controller):
-    global pf_state
-
-    my_loc = rc.get_position()
-    goal = pf_state.virtual_target
-
-    if my_loc == goal:
-        return
-
-    width = rc.get_map_width()
-    height = rc.get_map_height()
-
-    q = deque([goal])
-    visited = {goal}
-    parent = {}
-
-    found = False
-
-    while q:
-        cur = q.popleft()
-
-        if cur == my_loc:
-            found = True
-            break
-
-        for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
-            nxt = cur.add(d)
-
-            if nxt in visited:
-                continue
-            if not actually_navvable(rc, nxt):
-                continue
-            bbid = rc.get_tile_builder_bot_id(nxt)
-            if bbid is not None and bbid != rc.get_id():
-                continue
-
-            visited.add(nxt)
-            parent[nxt] = cur
-            q.append(nxt)
-
-    if not found:
-        pf_state.virtual_target = my_loc
-        return
-
-    best_pos = parent[my_loc]
-    best_dir = my_loc.direction_to(best_pos)
-
-    if rc.can_destroy(best_pos) and should_destroy(rc, best_pos):
-        rc.destroy(best_pos)
-
-    if rc.can_move(best_dir):
-        rc.move(best_dir)
-    elif rc.can_build_road(best_pos):
-        rc.build_road(best_pos)
-        if rc.can_move(best_dir):
-            rc.move(best_dir)
-
-
-def simple_step(rc: Controller, d: Direction):
-    p = rc.get_position().add(d)
-    if rc.can_move(d):
-        rc.move(d)
-    elif rc.can_build_road(p):
-        rc.build_road(p)
+        moved = False
+        if rc.can_destroy(next_pos) and should_destroy(rc, next_pos):
+            rc.destroy(next_pos)
         if rc.can_move(d):
             rc.move(d)
-
-
-# Cardinal Pathfinding
-
-def cardinal_pathfind_to(rc: Controller, target: Position, going_home: bool):
-    global pf_state
-
-    rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
-    if pf_state.final_target != target:
-        pf_state.reset()
-        pf_state.final_target = target
-        pf_state.virtual_target = rc.get_position()
-    
-    if rc.get_position() == target:
-        return True
-
-    # if rc.get_position().distance_squared(target) == 1:
-    #     if rc.can_move(rc.get_position().direction_to(target)):
-    #         rc.move(rc.get_position().direction_to(target))
-    #         return True
-
-    if rc.get_position() == pf_state.virtual_target:
-        pf_state.bug_cooldown = 8
-        recompute_cardinal_virtual_target(rc)
-    else:
-        pf_state.bug_cooldown -= 1
-    
-    if pf_state.bug_cooldown <= 0:
-        pf_state.virtual_target = rc.get_position()
-        pf_state.should_bug = False
-        return False
-
-    cardinal_pathfind_to_virtual(rc, going_home)
-    if rc.get_position() == target:
-        return True
-    return False
-
-
-def recompute_cardinal_virtual_target(rc: Controller):
-    global pf_state
-
-    current: Position = rc.get_position()
-
-    # print("Round", rc.get_current_round(), file=sys.stderr)
-    
-    steps = 0
-    while rc.is_in_vision(current) and steps < 5:
-        # Stop if reached goal
-        if current == pf_state.final_target:
-            break
-        print("Iter --", current)
-
-        steps += 1
-
-        if pf_state.should_bug:
-            # Run Bug 1.5
-
-            # Guess which way to turn while circumnavving
-            if pf_state.should_guess_rotation:
-                pf_state.should_guess_rotation = False
-
-                dirL: Direction = pf_state.bug_dir
-                for _ in range(8):
-                    if cardinal_virtually_navvable(rc, current.add(dirL), dirL):
-                        break
-                    dirL = dirL.rotate_left().rotate_left()
-                locL = current.add(dirL)
-                
-                dirR: Direction = pf_state.bug_dir
-                for _ in range(8):
-                    if cardinal_virtually_navvable(rc, current.add(dirR), dirR):
-                        break
-                    dirR = dirR.rotate_right()
-                locR = current.add(dirR)
-
-                pf_state.clockwise = locL.distance_squared(pf_state.final_target) > locR.distance_squared(pf_state.final_target)
-
-            # Try to find wall-follow dir
-            current_loc: Position = None
-            new_loc: Position = current.add(pf_state.bug_dir)
-            picked_dir: Direction = pf_state.bug_dir
-
-            if cardinal_virtually_navvable(rc, new_loc, pf_state.bug_dir):
-                current_loc = new_loc
-            else:
-                break_flag = False
-                for _ in range(8):
-                    candidate_dir = pf_state.bug_dir.rotate_right() if pf_state.clockwise else pf_state.bug_dir.rotate_left()
-                    new_loc = current.add(candidate_dir)
-                    if cardinal_virtually_navvable(rc, new_loc, candidate_dir):
-                        current_loc = new_loc
-                        picked_dir = candidate_dir
-                        break
-                    elif not is_in_map(new_loc, rc.get_map_width(), rc.get_map_height()):
-                        pf_state.clockwise = not pf_state.clockwise
-                        break_flag = True
-                        break
-                    pf_state.bug_dir = candidate_dir
-
-                if break_flag:
-                    break
-
-            if current_loc is not None:
-                if not is_in_map(current_loc, rc.get_map_width(), rc.get_map_height()):
-                    break
-                assert current_loc != current
-                current = current_loc
-                
-                if not CARDINAL_DIRECTIONS.__contains__(picked_dir):
-                    steps += 1
-                
-                pf_state.bug_dir = pf_state.bug_dir.rotate_right() if not pf_state.clockwise else pf_state.bug_dir.rotate_left()
-                d = current.distance_squared(pf_state.final_target)
-                if d < pf_state.best_bug_dist:
-                    pf_state.should_bug = False
-
-            # print("Bug mode: ", current)
-        else:
-            # Greedy
-            closest = current.distance_squared(pf_state.final_target)
-            best = current
-            for d in CARDINAL_DIRECTIONS:
-                if cardinal_virtually_navvable(rc, current.add(d), d):
-                    nxt = current.add(d)
-                    dist = nxt.distance_squared(pf_state.final_target)
-                    if dist < closest:
-                        closest = dist
-                        best = nxt
-
-            if not rc.is_in_vision(best):
-                break
-            
-            if best != current:
-                current = best
-            else:
-                pf_state.should_bug = True
-                pf_state.best_bug_dist = current.distance_squared(pf_state.final_target)
-                pf_state.bug_dir = cardinal_direction_to(current, pf_state.final_target)
-            
-            # print("Greedy: ", current)
+            moved = True
+        elif rc.can_build_road(next_pos):
+            rc.build_road(next_pos)
+            if rc.can_move(d):
+                rc.move(d)
+                moved = True
         
-        rc.draw_indicator_dot(current, 50, 180, 50)
-    
-    pf_state.virtual_target = current
-    # print(pf_state.virtual_target, file=sys.stderr)
-    rc.draw_indicator_dot(pf_state.virtual_target, 50, 255, 50)
-
-
-def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
-    global pf_state
-
-    my_loc = rc.get_position()
-    goal = pf_state.virtual_target
-
-    if my_loc == goal: return
-
-    width = rc.get_map_width()
-    height = rc.get_map_height()
-
-    q = deque([goal])
-    visited = {goal}
-    parent = {}
-    found = False
-
-    while q:
-        cur = q.popleft()
-        if cur == my_loc:
-            found = True
-            break
-        for d in CARDINAL_DIRECTIONS:
-            nxt = cur.add(d)
-
-            if nxt in visited:
-                continue
-            if not actually_navvable(rc, nxt):
-                continue
-            bbid = rc.get_tile_builder_bot_id(nxt)
-            if bbid is not None and bbid != rc.get_id():
-                continue
-
-            visited.add(nxt)
-            parent[nxt] = cur
-            q.append(nxt)
-    
-    if not found:
-        pf_state.virtual_target = my_loc
-        return
-
-    best_pos = parent[my_loc]
-    best_dir = my_loc.direction_to(best_pos)
-    
-    # Verify conveyor direction below
-    conveyor_dir = best_dir
-    bldg = rc.get_tile_building_id(my_loc)
-
-    if bldg is not None: print(my_loc, rc.get_entity_type(bldg))
-    if bldg is None or not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
-        allied = rc.get_team(bldg) == rc.get_team()
-        if allied:
-            if rc.can_destroy(my_loc): rc.destroy(my_loc)
+        if not moved:
+            env = sense.get_env(next_pos)
+            entt = sense.get_entity(next_pos)
+            allied = sense.is_allied(next_pos)
+            if not is_entt_pathable(entt, allied) or env == Environment.WALL:
+                pf_state.reset()
         else:
-            if rc.can_fire(my_loc): rc.fire(my_loc)
-        if rc.can_build_conveyor(my_loc, conveyor_dir):
-            rc.build_conveyor(my_loc, conveyor_dir)
-        return
-    
-    if going_home:
-        next_pos = parent.get(best_pos)
-        if next_pos:
-            conveyor_dir = best_pos.direction_to(next_pos)
-        else:
-            conveyor_dir = best_dir
-    else:
-        conveyor_dir = best_dir.opposite()
-
-    bldg = rc.get_tile_building_id(best_pos)
-    if bldg is not None or not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
-        allied = rc.get_team(bldg) == rc.get_team()
-        if allied:
-            if not (rc.get_entity_type(bldg) == EntityType.SPLITTER or rc.get_entity_type(bldg) == EntityType.BRIDGE):
-                if rc.can_destroy(best_pos):
-                    rc.destroy(best_pos)
+            pf_state.result_path.pop(0)
             
-        
-    if rc.can_build_conveyor(best_pos, conveyor_dir):
-        rc.build_conveyor(best_pos, conveyor_dir)
-    if rc.can_move(best_dir):
-        rc.move(best_dir)
+        if rc.get_position() == target: return True
 
-# Pre-emptable cardinal pathfinding
 
-def preemptable_cardinal_pathfind_to(rc: Controller, target: Position, going_home: bool):
-    global pf_state
+def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
+    expansions = 0
+    open_set = pf_state.open_set
+    came_from = pf_state.came_from
+    g_score = pf_state.g_score
+    goal = pf_state.goal
 
-    rc.draw_indicator_line(rc.get_position(), target, 0, 128, 0)
-    if pf_state.final_target != target:
+    map_w = sense.map_width
+    map_h = sense.map_height
+    
+    while open_set and expansions < max_expansions:
+        _, current = heappop(open_set)
+        if current not in pf_state.g_score:
+            continue
+
+        if current == goal:
+            rc.draw_indicator_dot(current, 0, 255, 0)
+            path = reconstruct_path(came_from, current)
+            pf_state.result_path = path
+            pf_state.result_path.pop(0)
+            if pf_state.result_path:
+                rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
+
+            for i in range(len(pf_state.result_path) - 1):
+                rc.draw_indicator_line(
+                    pf_state.result_path[i],
+                    pf_state.result_path[i + 1],
+                    0, 255, 0
+                )
+            pf_state.astar_active = False
+            return
+
+        for d in DIRECTIONS:
+            nxt = current.add(d)
+            cost = 1
+
+            if not is_in_map(nxt, map_w, map_h): continue
+            if sense.is_seen(nxt):
+                env = sense.get_env(nxt)
+                entt = sense.get_entity(nxt)
+                allied = sense.is_allied(nxt)
+                if env == Environment.WALL: continue
+                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
+
+                if not is_entt_pathable(entt, allied):
+                    if allied and entt == EntityType.BARRIER:
+                        cost = BARRIER_COST
+                    else: continue
+            
+            tentative = g_score[current] + cost
+            if nxt in g_score and tentative >= g_score[nxt]: continue
+            
+            came_from[nxt] = current
+            g_score[nxt] = tentative
+            heappush(
+                open_set,
+                (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
+            )
+            rc.draw_indicator_dot(nxt, 255, 0, 0)
+
+        expansions += 1
+
+
+# Cardinal Pathfind
+
+def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_home: bool):
+    cur = rc.get_position()
+    if cur == target: return True
+
+    # start / restart A*
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target:
         pf_state.reset()
-        pf_state.final_target = target
-        pf_state.virtual_target = rc.get_position()
-    
-    if rc.get_position() == target:
-        return (True, False)
+        pf_state.astar_active = True
+        pf_state.goal = target
 
-    # if rc.get_position().distance_squared(target) == 1:
-    #     if rc.can_move(rc.get_position().direction_to(target)):
-    #         rc.move(rc.get_position().direction_to(target))
-    #         return True
+        pf_state.g_score[cur] = 0
+        heappush(pf_state.open_set, (0, cur))
 
-    if rc.get_position() == pf_state.virtual_target:
-        pf_state.bug_cooldown = 8
-        recompute_cardinal_virtual_target(rc)
-    else:
-        pf_state.bug_cooldown -= 1
-    
-    if pf_state.bug_cooldown <= 0:
-        pf_state.virtual_target = rc.get_position()
-        pf_state.should_bug = False
-        return (False, False)
+    # continue A* for a limited budget
+    if pf_state.astar_active:
+        step_cardinal_astar_internal(rc, sense, max_expansions=50)
 
-    if preemptable_cardinal_pathfind_to_virtual(rc, going_home):
-        return (True, True)
-    if rc.get_position() == target:
-        return (True, False)
-    return (False, False)
+    if pf_state.result_path:
+        next_pos = pf_state.result_path[0]
+        d = cur.direction_to(next_pos)
+        
+        # Possibly fix conveyor this bot is standing on
+        conveyor_dir = d
+        entt = sense.get_entity(cur)
+        needs_fix = (entt is None or \
+            not (
+                entt == EntityType.CONVEYOR and
+                rc.get_direction(rc.get_tile_building_id(cur)) == conveyor_dir
+            )
+        )
 
+        if needs_fix:
+            if entt is not None:
+                allied = sense.is_allied(cur)
+                if allied:
+                    if rc.can_destroy(cur): rc.destroy(cur)
+                else:
+                    if rc.can_fire(cur): rc.fire(cur)
+                
+            if rc.can_build_conveyor(cur, d):
+                rc.build_conveyor(cur, d)
+                needs_fix = False
+        if needs_fix: return False
 
-def preemptable_cardinal_pathfind_to_virtual(rc: Controller, going_home: bool) -> bool:
-    global pf_state
+        # Figure out new conveyor direction
+        if going_home:
+            if 1 < len(pf_state.result_path):
+                conv_next = pf_state.result_path[1]
+                conveyor_dir = next_pos.direction_to(conv_next)
+            else:
+                conveyor_dir = d
+        else:
+            conveyor_dir = d.opposite()
 
-    my_loc = rc.get_position()
-    goal = pf_state.virtual_target
-
-    if my_loc == goal: return
-
-    width = rc.get_map_width()
-    height = rc.get_map_height()
-
-    q = deque([goal])
-    visited = {goal}
-    parent = {}
-    found = False
-
-    while q:
-        cur = q.popleft()
-        if cur == my_loc:
-            found = True
-            break
-        for d in CARDINAL_DIRECTIONS:
-            nxt = cur.add(d)
-
-            if nxt in visited:
-                continue
-            if not actually_navvable(rc, nxt):
-                continue
-            bbid = rc.get_tile_builder_bot_id(nxt)
-            if bbid is not None and bbid != rc.get_id():
-                continue
-
-            visited.add(nxt)
-            parent[nxt] = cur
-            q.append(nxt)
-    
-    if not found:
-        pf_state.virtual_target = my_loc
-        return
-
-    best_pos = parent[my_loc]
-    best_dir = my_loc.direction_to(best_pos)
-    
-    # Verify conveyor direction below
-    conveyor_dir = best_dir
-    bldg = rc.get_tile_building_id(my_loc)
-
-    if bldg is None or not (rc.get_entity_type(bldg) == EntityType.CONVEYOR and rc.get_direction(bldg) == conveyor_dir):
-        allied = rc.get_team(bldg) == rc.get_team()
+        # Actually move
+        moved = False
+        allied = sense.is_allied(next_pos)
         if allied:
-            if rc.can_destroy(my_loc): rc.destroy(my_loc)
+            if rc.can_destroy(next_pos): rc.destroy(next_pos)
         else:
-            if rc.can_fire(my_loc): rc.fire(my_loc)
-        if rc.can_build_conveyor(my_loc, conveyor_dir):
-            rc.build_conveyor(my_loc, conveyor_dir)
-        return
-    
-    if going_home:
-        next_pos = parent.get(best_pos)
-        if next_pos:
-            conveyor_dir = best_pos.direction_to(next_pos)
+            if rc.can_fire(next_pos): rc.fire(next_pos)
+        if rc.can_build_conveyor(next_pos, conveyor_dir):
+            rc.build_conveyor(next_pos, conveyor_dir)
+        if rc.can_move(d):
+            rc.move(d)
+            moved = True
+        
+        # Possibly recompute if blocked
+        if not moved:
+            env = sense.get_env(next_pos)
+            entt = sense.get_entity(next_pos)
+            allied = sense.is_allied(next_pos)
+            if not is_entt_pathable(entt, allied) or env == Environment.WALL:
+                pf_state.reset()
         else:
-            conveyor_dir = best_dir
-    else:
-        conveyor_dir = best_dir.opposite()
+            pf_state.result_path.pop(0)
+            
+        if rc.get_position() == target: return True
 
+
+def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
+    expansions = 0
+    open_set = pf_state.open_set
+    came_from = pf_state.came_from
+    g_score = pf_state.g_score
+    goal = pf_state.goal
+
+    map_w = sense.map_width
+    map_h = sense.map_height
     
-    bldg = rc.get_tile_building_id(best_pos)
-    if bldg is not None:
-        allied = rc.get_team(bldg) == rc.get_team()
-        if is_friendly_transport(rc, best_pos):
-            return True
-        elif allied:
-            if not (rc.get_entity_type(bldg) == EntityType.SPLITTER or rc.get_entity_type(bldg) == EntityType.BRIDGE):
-                if rc.can_destroy(best_pos):
-                    rc.destroy(best_pos)
-    
-    if rc.can_build_conveyor(best_pos, conveyor_dir):
-        rc.build_conveyor(best_pos, conveyor_dir)
-    if rc.can_move(best_dir):
-        rc.move(best_dir)
-    return False
-    
+    while open_set and expansions < max_expansions:
+        _, current = heappop(open_set)
+        if current not in pf_state.g_score:
+            continue
+
+        if current == goal:
+            rc.draw_indicator_dot(current, 0, 255, 0)
+            path = reconstruct_path(came_from, current)
+            pf_state.result_path = path
+            pf_state.result_path.pop(0)
+            if pf_state.result_path:
+                rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
+
+            for i in range(len(pf_state.result_path) - 1):
+                rc.draw_indicator_line(
+                    pf_state.result_path[i],
+                    pf_state.result_path[i + 1],
+                    0, 255, 0
+                )
+            pf_state.astar_active = False
+            return
+
+        for d in CARDINAL_DIRECTIONS:
+            nxt = current.add(d)
+            cost = 1
+
+            if not is_in_map(nxt, map_w, map_h): continue
+            if sense.is_seen(nxt):
+                env = sense.get_env(nxt)
+                entt = sense.get_entity(nxt)
+                allied = sense.is_allied(nxt)
+                if env == Environment.WALL: continue
+                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
+
+                if not is_entt_pathable(entt, allied):
+                    if allied and entt == EntityType.BARRIER:
+                        cost = BARRIER_COST
+                    else: continue
+                
+            tentative = g_score[current] + cost
+            if nxt in g_score and tentative >= g_score[nxt]: continue
+            
+            came_from[nxt] = current
+            g_score[nxt] = tentative
+            heappush(
+                open_set,
+                (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
+            )
+            rc.draw_indicator_dot(nxt, 255, 0, 0)
+
+        expansions += 1
+
+
+
+
+
+
+
+def get_path():
+    return pf_state.result_path
+
+def reconstruct_path(came_from, current):
+    path = [current]
+    while current in came_from:
+        current = came_from[current]
+        path.append(current)
+    path.reverse()
+    return path
 
 # Helpers
 
@@ -599,6 +327,14 @@ def is_tile_within_n_cardinal_steps(rc: Controller, start: Position, end: Positi
 
     return False
 
+def simple_step(rc: Controller, d: Direction):
+    p = rc.get_position().add(d)
+    if rc.can_move(d):
+        rc.move(d)
+    elif rc.can_build_road(p):
+        rc.build_road(p)
+        if rc.can_move(d):
+            rc.move(d)
 
 def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Direction) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()):
@@ -607,27 +343,54 @@ def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Dir
         return True
     
     if CARDINAL_DIRECTIONS.__contains__(incoming_dir):
-        return actually_navvable(rc, pos) or rc.get_tile_builder_bot_id(pos) is not None
+        return cardinal_unit_virtually_navvable(rc, pos)
     else:
         (dx, dy) = incoming_dir.opposite().delta()
         prev = pos.add(incoming_dir.opposite())
         test0 = prev.add(Direction.WEST  if dx == 1 else Direction.EAST)
         test1 = prev.add(Direction.NORTH if dy == 1 else Direction.SOUTH)
 
-        if not actually_navvable(rc, test0) and not actually_navvable(rc, test1):
+        if not cardinal_unit_virtually_navvable(rc, test0) and not cardinal_unit_virtually_navvable(rc, test1):
             return False
-        return actually_navvable(rc, pos) or rc.get_tile_builder_bot_id(pos) is not None
+        return cardinal_unit_virtually_navvable(rc, pos)
 
-def virtually_navvable(rc: Controller, pos: Position) -> bool:
+def cardinal_unit_virtually_navvable(rc: Controller, pos: Position, non_conveyor: bool = False) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
         return False
-    is_friendly_barrier = False
+    
     bldg = rc.get_tile_building_id(pos)
     if bldg is not None:
         allied = rc.get_team(bldg) == rc.get_team()
         if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
-            is_friendly_barrier = True
-    return ((rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos) or is_friendly_barrier)
+            return True
+        if rc.get_entity_type(bldg) in ENTITY_TRANSPORT and allied:
+            return False
+    
+    return (rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos)
+
+def cardinal_actually_navvable(rc: Controller, pos: Position) -> bool:
+    if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
+        return False
+    return is_pos_pathable(rc, pos) and not is_friendly_transport(rc, pos)
+
+
+def virtually_navvable(rc: Controller, pos: Position) -> bool:
+    if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
+        return False
+    if rc.get_tile_env(pos) == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is not None:
+        allied = rc.get_team(bldg) == rc.get_team()
+        if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
+            return True
+    
+    return (rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos)
+
+def actually_navvable(rc: Controller, pos: Position) -> bool:
+    if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
+        return False
+    return is_pos_pathable(rc, pos)
 
 def should_destroy(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
@@ -635,8 +398,3 @@ def should_destroy(rc: Controller, pos: Position) -> bool:
     entt = rc.get_entity_type(bldg)
     # TODO maybe add more things that should be destroyed here
     return entt == EntityType.MARKER or entt == EntityType.BARRIER
-
-def actually_navvable(rc: Controller, pos: Position) -> bool:
-    if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
-        return False
-    return is_pos_pathable(rc, pos)

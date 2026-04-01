@@ -41,6 +41,7 @@ class Sense:
         self.map_width = rc.get_map_width()
         self.map_height = rc.get_map_height()
         self.size = self.map_width * self.map_height
+        self.nearby_tiles = []
 
         self.map = array('H', [0] * self.size)
         self.env_index: Dict[int, Set[Position]] = {v: set() for v in _ENVIRONMENT_TO_VALUE.values()}
@@ -48,13 +49,12 @@ class Sense:
         self.ally_builders:  Set[Position] = set()
         self.enemy_builders: Set[Position] = set()
         self.enemy_core_found: Position = None
-
+    
+        self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
         if self.map_width > self.map_height:
             self.symmetries_possible = [ Symmetry.HORIZONTAL, Symmetry.ROTATIONAL, Symmetry.VERTICAL ]
         elif self.map_height > self.map_width:
             self.symmetries_possible = [ Symmetry.VERTICAL, Symmetry.ROTATIONAL, Symmetry.HORIZONTAL ]
-        else:
-            self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
         
     def idx(self, p: Position) -> int:
         return p.x + self.map_width * p.y
@@ -89,6 +89,7 @@ class Sense:
     
     def is_allied(self, pos: Position):
         return self.map[self.idx(pos)] & 1
+    
 
     def is_seen(self, pos: Position):
         return self.map[self.idx(pos)] != 0
@@ -101,8 +102,8 @@ class Sense:
         self.ally_builders.clear()
         self.enemy_builders.clear()
         
-        nearby_tiles = self.rc.get_nearby_tiles()
-        for t in nearby_tiles:
+        self.nearby_tiles = self.rc.get_nearby_tiles()
+        for t in self.nearby_tiles:
             # Save Env and Buildings
             env = self.rc.get_tile_env(t)
             bldg = self.rc.get_tile_building_id(t)
@@ -129,7 +130,7 @@ class Sense:
                     test = get_symmetric(t, self.map_width, self.map_height, sym)
                     env_here = self.get_env(test)
                     if env_here != None:
-                        if env_here != _ENVIRONMENT_TO_VALUE[env]:
+                        if env_here != env:
                             to_elim.append(sym)
                 self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
             

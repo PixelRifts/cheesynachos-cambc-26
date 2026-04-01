@@ -36,17 +36,28 @@ class SimpleShooter(Bot):
     def start_turn(self):
         self.best_target = None
 
-        entities = self.rc.get_nearby_entities()
+        attackables = self.rc.get_attackable_tiles()
         priority = -100000
-        for e in entities:
-            p = self.rc.get_position(e)
-            if self.rc.get_team(e) == self.rc.get_team():
-                continue
-            entt = self.rc.get_entity_type(e)
-            if priorities[entt] < 0: continue
-            if priorities[entt] > priority and self.rc.can_fire(p):
-                priority = priorities[entt]
-                self.best_target = p
+        for p in attackables:
+            e = self.rc.get_tile_building_id(p)
+            bb = self.rc.get_tile_builder_bot_id(p)
+
+            if e is not None:
+                if self.rc.get_team(e) == self.rc.get_team():
+                    continue
+                entt = self.rc.get_entity_type(e)
+                if priorities[entt] < 0: continue
+                if priorities[entt] > priority and self.rc.can_fire(p):
+                    priority = priorities[entt]
+                    self.best_target = p
+            if bb is not None:
+                if self.rc.get_team(bb) == self.rc.get_team():
+                    continue
+                if priorities[EntityType.BUILDER_BOT] < 0: continue
+                if priorities[EntityType.BUILDER_BOT] > priority and self.rc.can_fire(p):
+                    priority = priorities[EntityType.BUILDER_BOT]
+                    self.best_target = p
+
         pass
 
     def turn(self):

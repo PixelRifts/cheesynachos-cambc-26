@@ -23,8 +23,6 @@ class PFState:
 
 pf_state = PFState()
 
-import inspect
-
 # This is a 2 tier-ed approach, that I implemented for MIT Battlecode translated to python
 # Could have bugs, subject to change
 def fast_pathfind_to(rc: Controller, target: Position):
@@ -44,8 +42,17 @@ def fast_pathfind_to(rc: Controller, target: Position):
             rc.move(rc.get_position().direction_to(target))
             return True
 
+    
     if rc.get_position() == pf_state.virtual_target:
+        pf_state.bug_cooldown = 8
         recompute_fast_virtual_target(rc)
+    else:
+        pf_state.bug_cooldown -= 1
+    
+    if pf_state.bug_cooldown <= 0:
+        pf_state.virtual_target = rc.get_position()
+        pf_state.should_bug = False
+        return False
     
     fast_pathfind_to_virtual(rc)
     if rc.get_position() == target:
@@ -62,11 +69,11 @@ def recompute_fast_virtual_target(rc: Controller):
     current: Position = pf_state.virtual_target
     
     steps = 0
-    while rc.is_in_vision(current) and steps < 3:
+    while rc.is_in_vision(current) and steps < 4:
         # Stop if reached goal
         if current == pf_state.final_target:
             break
-        print("Iter --", current)
+        # print("Iter --", current)
 
         steps += 1
 
@@ -126,7 +133,7 @@ def recompute_fast_virtual_target(rc: Controller):
                     pf_state.should_bug = False
                     # print('exit bugmode')
 
-            # print("Bug mode: ", current)
+            print("Bug mode: ", current)
         else:
             # Greedy
             direct_action = current.direction_to(pf_state.final_target)
@@ -154,7 +161,7 @@ def recompute_fast_virtual_target(rc: Controller):
                 pf_state.bug_dir = current.direction_to(pf_state.final_target)
                 pf_state.should_guess_rotation = False
             
-            # print("Greedy: ", current)
+            print("Greedy: ", current)
         
         # rc.draw_indicator_dot(current, 50, 180, 50)
     
@@ -450,7 +457,7 @@ def cardinal_pathfind_to_virtual(rc: Controller, going_home: bool):
             if not (rc.get_entity_type(bldg) == EntityType.SPLITTER or rc.get_entity_type(bldg) == EntityType.BRIDGE):
                 if rc.can_destroy(best_pos):
                     rc.destroy(best_pos)
-            
+    
         
     if rc.can_build_conveyor(best_pos, conveyor_dir):
         rc.build_conveyor(best_pos, conveyor_dir)
@@ -627,6 +634,7 @@ def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Dir
 def virtually_navvable(rc: Controller, pos: Position) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
         return False
+    if rc.get_tile_env(pos) == Environment.WALL: return False
     is_friendly_barrier = False
     bldg = rc.get_tile_building_id(pos)
     if bldg is not None:
@@ -645,4 +653,4 @@ def should_destroy(rc: Controller, pos: Position) -> bool:
 def actually_navvable(rc: Controller, pos: Position) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
         return False
-    return is_pos_pathable(rc, pos)
+    return is_pos_pathable(rc, pos) and (rc.get_tile_builder_bot_id(pos) is None or rc.get_tile_builder_bot_id(pos) == rc.get_id())

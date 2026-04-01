@@ -14,6 +14,7 @@ ENTITY_TRANSPORT  = { EntityType.CONVEYOR, EntityType.BRIDGE, EntityType.SPLITTE
 ENTITY_TURRET     = { EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH, EntityType.LAUNCHER }
 ENTITY_TRIVIAL    = { None, EntityType.ROAD, EntityType.MARKER }
 ENTITY_CORE       = { EntityType.CORE }
+ENTITY_REPLACABLE = { EntityType.BARRIER }
 ENTITY_UNWALKABLE = { EntityType.HARVESTER, EntityType.FOUNDRY, EntityType.BARRIER } | ENTITY_TURRET
 ENTITY_WALKABLE   = ENTITY_TRIVIAL | ENTITY_TRANSPORT
 
@@ -24,6 +25,16 @@ ENTITY_VALID_BLOCKAGE_FRIENDLY = ENTITY_TURRET | ENTITY_TRANSPORT
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
 
+def dist_to_nearest_target(x: Position, target_tiles: list[Position]):
+    best = 10000000000
+    for t in target_tiles:
+        d = t.distance_squared(x)
+        if d < best:
+            best = d
+            if best == 0:
+                break
+    return best
+        
 # Symmetry Functions:
 
 class Symmetry(Enum):
@@ -54,6 +65,16 @@ def is_pos_pathable(rc: Controller, pos: Position) -> bool:
     entt = rc.get_entity_type(bldg)
     allied = rc.get_team() == rc.get_team(bldg)
     return is_entt_pathable(entt, allied)
+
+def is_pos_conveyorable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    allied = rc.get_team() == rc.get_team(bldg)
+    entt = rc.get_entity_type(bldg)
+    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL)
 
 def is_pos_editable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return True

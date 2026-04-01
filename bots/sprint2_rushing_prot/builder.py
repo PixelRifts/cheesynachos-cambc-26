@@ -294,7 +294,7 @@ class BuilderBot(Bot):
         if get_building_type(self.rc, self.econ_target_ore) == EntityType.HARVESTER and is_adjacent(self.rc.get_position(), self.econ_target_ore):
             self.switch_state(BotState.ECON_CONNECT)
             self.pathfind_target = self.core_pos
-            return    
+            return
         
         if is_adjacent(self.rc.get_position(), self.econ_target_ore) and not get_building_type(self.rc, self.econ_target_ore) == EntityType.HARVESTER:
             if not try_destroy(self.rc, self.pathfind_target, self.econ_target_ore):
@@ -519,7 +519,7 @@ class BuilderBot(Bot):
                     d_to_me = p.distance_squared(self.rc.get_position())
                     d_to_core = p.distance_squared(self.enemy_core_pos)
                     
-                    if d_to_me > max_dist and (d_to_core <= GameConstants.SENTINEL_VISION_RADIUS_SQ + 1):
+                    if d_to_me > max_dist and (d_to_core <= GameConstants.GUNNER_VISION_RADIUS_SQ + 1):
                         max_dist = d_to_me
                         picked_bldg = p
                 elif entt == EntityType.HARVESTER:
@@ -567,8 +567,8 @@ class BuilderBot(Bot):
             if not try_destroy(self.rc, self.pathfind_target, self.attack_target): return
             dir = self.attack_target.direction_to(self.enemy_core_pos)
         
-            if not self.rc.can_build_sentinel(self.attack_target, dir): return
-            self.rc.build_sentinel(self.attack_target, dir)
+            if not self.rc.can_build_gunner(self.attack_target, dir): return
+            self.rc.build_gunner(self.attack_target, dir)
 
         self.switch_state(BotState.ATTACK_GOTO)
         self.pathfind_target = self.enemy_core_pos
