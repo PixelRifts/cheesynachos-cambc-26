@@ -44,21 +44,73 @@ class MatchRunner:
         Args:
             bot1: Name of first bot
             bot2: Name of second bot
-            map_name: Name of the map
+            map_name: Name of the map (without .map26 extension)
             seed: Random seed for the match
             
         Returns:
             MatchResult object with match outcome
         """
-        #Needs to be implemented later. For now it returns a dummy value.
         timestamp = datetime.now()
-        return MatchResult(bot1, bot2, map_name, None, (0, 0), timestamp)
+        
+        try:
+            # Construct full map path
+            maps_dir = self.root_dir / "maps"
+            map_file = maps_dir / f"{map_name}.map26"
+            
+            result = subprocess.run(
+                ["cambc", "run", bot1, bot2, str(map_file), "--seed", str(seed)],
+                cwd=self.root_dir,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            
+            winner, score = self._parse_output(result.stdout, result.stderr, bot1, bot2)
+            return MatchResult(bot1, bot2, map_name, winner, score, timestamp)
+            
+        except subprocess.TimeoutExpired:
+            return MatchResult(bot1, bot2, map_name, None, (0, 0), timestamp, error="Timeout")
+        except Exception as e:
+            return MatchResult(bot1, bot2, map_name, None, (0, 0), timestamp, error=str(e))
     
     def _parse_output(self, stdout: str, stderr: str, bot1: str, bot2: str) -> Tuple[Optional[str], Tuple[int, int]]:
-        """Parse cambc output to determine winner and score. Needs to be implemented later.
+        """Parse cambc output to determine winner and score.
             
         Returns:
             Tuple of (winner_name, (bot1_score, bot2_score))
         """
+        winner = None
+        bot1_score = 0
+        bot2_score = 0
         
-        return None, (0, 0)
+        winner_match = re.search(r'Winner:\s+(\S+)', stdout)
+        if winner_match:
+            winner = winner_match.group(1)
+        
+        lines = stdout.split('\n')
+        header_bots = None
+        
+        for i, line in enumerate(lines):
+            if 'Titanium' in line and i > 0:
+                header_line = lines[i-1]
+                parts = header_line.split()
+                if len(parts) == 2:
+                    header_bots = (parts[0], parts[1])
+                break
+        
+        buildings_match = re.search(r'Buildings\s+(\d+)\s+(\d+)', stdout)
+        
+        if header_bots and buildings_match:
+            first_bot, second_bot = header_bots
+            first_score = int(buildings_match.group(1))
+            second_score = int(buildings_match.group(2))
+            
+            # Map scores to bot1 and bot2 based on header positions
+            if first_bot == bot1:
+                bot1_score = first_score
+                bot2_score = second_score
+            else:
+                bot1_score = second_score
+                bot2_score = first_score
+        
+        return winner, (bot1_score, bot2_score)
