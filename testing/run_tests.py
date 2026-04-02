@@ -169,10 +169,8 @@ def main():
         
         print("\n\nAll matches completed!")
         
-        # Analyze results
         stats = analyzer.analyze_results(target_bot, results)
         
-        # Save to CSV if requested
         csv_path = None
         if save_csv:
             csv_path = analyzer.save_to_csv(target_bot, results)
