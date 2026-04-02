@@ -14,7 +14,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 BOT_EXPLORE_TIMEOUT = 12
 AXIONITE_ENABLE_ROUND = 200
 CORE_DANGER = 20
-BRIDGE_USAGE_CUTOFF = 3
+BRIDGE_USAGE_CUTOFF = 5
 
 class BotState(Enum):
     ECON_EXPLORE = "Explore"
@@ -163,6 +163,7 @@ class BuilderBot(Bot):
         if not self.sense.is_seen(self.econ_target_ore):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
             return
+        ore_has = self.sense.get_entity(self.econ_target_ore)
 
         # Validate Walls
         valid_count = 0
@@ -182,7 +183,8 @@ class BuilderBot(Bot):
                 (allied and entt in ENTITY_VALID_BLOCKAGE_FRIENDLY):
                 valid_count += 1
             else:
-                if try_destroy(self.rc, self.sense, self.econ_target_ore, adj):
+                goto = self.econ_target_ore if ore_has in (ENTITY_TRIVIAL|ENTITY_TRANSPORT) else adj.add(get_best_empty_adj(self.rc, adj, self.rc.get_position()))
+                if try_destroy(self.rc, self.sense, goto, adj):
                     if self.rc.can_build_barrier(adj):
                         self.rc.build_barrier(adj)
                         valid_count += 1
@@ -205,9 +207,10 @@ class BuilderBot(Bot):
                 return
         
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
-            self.switch_state(BotState.ECON_CONNECT)
-            self.econ_connect_final_target = self.compute_best_flow_target()
-            self.pathfind_target = self.core_pos
+            if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
+                self.switch_state(BotState.ECON_CONNECT)
+                self.econ_connect_final_target = self.compute_best_flow_target()
+                self.pathfind_target = self.core_pos
 
     def econ_connect(self):
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position():
@@ -290,6 +293,7 @@ class BuilderBot(Bot):
         
         has_free_side = False
         already_siphoned = False
+        already_siphoned_dir = Direction.CENTRE
         bot_marked = pos in self.sense.ally_builders and self.rc.get_position() != pos
         not_enough_info = False
         harvester_placable = is_pos_editable(self.rc, pos)
@@ -308,17 +312,24 @@ class BuilderBot(Bot):
                 if self.rc.get_team(bb) == self.rc.get_team():
                     bot_marked = True
 
-            if is_friendly_transport(self.rc, p):
-                already_siphoned = True
+            entt = self.sense.get_entity(p)
+            if entt in ENTITY_TRANSPORT:
+                allied = self.sense.is_allied(p)
+                if allied:
+                    already_siphoned = True
+                    already_siphoned_dir = d
+                else:
+                    already_siphoned_dir = d
                 
             if is_pos_editable(self.rc, p):
                 has_free_side = True
         
         if bot_marked: return (False, Direction.CENTRE)
         if has_harvester and already_siphoned: return (False, Direction.CENTRE)
-        if not has_harvester and already_siphoned: return (harvester_placable, get_best_empty_adj(self.rc, pos, self.core_pos))
-        if has_harvester and not already_siphoned: return (not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
-        if not has_harvester and not already_siphoned and harvester_placable: return (not not_enough_info, get_best_empty_adj(self.rc, pos, self.core_pos))
+        tgt = get_best_empty_adj(self.rc, pos, self.core_pos)
+        if not has_harvester and already_siphoned: return (harvester_placable, tgt)
+        if has_harvester and not already_siphoned: return (not not_enough_info, tgt)
+        if not has_harvester and not already_siphoned and harvester_placable: return (not not_enough_info, tgt)
 
         return (False, Direction.CENTRE)
 
@@ -355,25 +366,36 @@ class BuilderBot(Bot):
         best = None
         best_dist = float('inf')
         build_finish = False
+        best_is_to_transport = False
         for t in self.sense.nearby_tiles:
             if start.distance_squared(t) > GameConstants.BRIDGE_TARGET_RADIUS_SQ: continue
 
+            is_to_transport = False
             env = self.sense.get_env(t)
             allied = self.sense.is_allied(t)
             entt = self.sense.get_entity(t)
             if env == Environment.WALL: continue
             if not allied and entt not in ENTITY_WALKABLE: continue
-            if     allied and entt not in ENTITY_TRIVIAL:  continue
+            if allied:
+                if entt in ENTITY_TRANSPORT:
+                    if self.rc.get_stored_resource_id(self.rc.get_tile_building_id(t)) is not None:
+                        continue
+                    else:
+                        is_to_transport = True
+                elif entt not in ENTITY_TRIVIAL:
+                    continue
+
             if t in self.sense.ally_builders: continue
 
             d = dist_to_nearest_target(t, target_tiles)
             if d < best_dist:
                 best_dist = d
                 best = t
+                best_is_to_transport = is_to_transport
 
         if best is not None:
             print('intermediate ', flow_target, best)
-            return (best, False)
+            return (best, best_is_to_transport)
         return (None, False)
 
     def should_bridge_heuristic(self, start: Position, end: Position) -> bool:
@@ -401,8 +423,8 @@ class BuilderBot(Bot):
                 allied = self.sense.is_allied(nxt)
                 if env == Environment.WALL: continue
                 if entt in ENTITY_UNWALKABLE: continue
-                if allied and entt in ENTITY_TRANSPORT: continue
-                if self.rc.get_tile_builder_bot_id(nxt) is not None: continue
+                if allied and entt in ENTITY_TRANSPORT and nxt is not end: continue
+                if self.rc.is_in_vision(nxt) and self.rc.get_tile_builder_bot_id(nxt) is not None: continue
 
                 if not pathfind.cardinal_virtually_navvable(self.rc, nxt, d): continue
                 if nxt in visited and visited[nxt] <= ng: continue

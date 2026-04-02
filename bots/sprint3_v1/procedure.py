@@ -5,11 +5,12 @@ from cambc import Controller, Environment, Position, Direction, EntityType
 
 def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position) -> bool:
     if not sense.is_seen(p):
-        pathfind.fast_pathfind_to(rc, me)
+        pathfind.fast_pathfind_to(rc, p)
         return False
     
     bldg = rc.get_tile_building_id(p)
     if bldg is None:
+        if me is None: return True
         return pathfind.fast_pathfind_to(rc, sense, me)
 
     entt = sense.get_entity(p)
@@ -27,14 +28,13 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position) -> bool
         else:
             print('cant destroy', p)
     else:
-        if rc.get_position() != p:
-            pathfind.fast_pathfind_to(rc, sense, p)
-            if rc.get_position() != p: return
-        
         if allied:
             if rc.can_destroy(p):
                 rc.destroy(p)
         else:
+            if rc.get_position() != p:
+                pathfind.fast_pathfind_to(rc, sense, p)
+                if rc.get_position() != p: return False
             if rc.can_fire(p):
                 rc.fire(p)
 

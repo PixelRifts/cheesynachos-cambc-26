@@ -22,6 +22,7 @@ class PFState:
         self.open_set = []
         self.came_from = {}
         self.g_score = {}
+        self.failed = False
 
         self.result_path = []
 
@@ -46,6 +47,10 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
     # continue A* for a limited budget
     if pf_state.astar_active:
         step_astar_internal(rc, sense, max_expansions=50)
+
+    if not pf_state.astar_active and pf_state.failed:
+        pf_state.result_path = []
+        return
 
     if pf_state.result_path:
         # follow path it
@@ -138,6 +143,10 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
 
         expansions += 1
 
+    if not open_set:
+        # no path exists
+        pf_state.astar_active = False
+        pf_state.failed = True
 
 # Cardinal Pathfind
 
@@ -157,6 +166,10 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     # continue A* for a limited budget
     if pf_state.astar_active:
         step_cardinal_astar_internal(rc, sense, max_expansions=50)
+    
+    if not pf_state.astar_active and pf_state.failed:
+        pf_state.result_path = []
+        return
 
     if pf_state.result_path:
         next_pos = pf_state.result_path[0]
@@ -263,7 +276,8 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 entt = sense.get_entity(nxt)
                 allied = sense.is_allied(nxt)
                 if env == Environment.WALL: continue
-                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
+                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != pf_state.goal: continue
+                if allied and entt in ENTITY_TRANSPORT: continue
 
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
@@ -282,9 +296,11 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
             rc.draw_indicator_dot(nxt, 255, 0, 0)
 
         expansions += 1
-
-
-
+    
+    if not open_set:
+        # no path exists
+        pf_state.astar_active = False
+        pf_state.failed = True
 
 
 
