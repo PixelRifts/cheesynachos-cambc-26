@@ -71,19 +71,20 @@ class BuilderBot(Bot):
                 self.core_pos = rc.get_position(b)
                 break
         self.map_center_pos = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
+        self.rush_spawn_pos = self.core_pos.add(self.core_pos.direction_to(self.map_center_pos))
         self.enemy_core_pos = get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), sense.sense_state.symmetries_possible[0])
         # self.econ_tracked_ore = set()
         self.base_stage = 0
         
-        if self.rc.get_position() == self.core_pos:
+        if self.rc.get_position() == self.rush_spawn_pos:
+            self.healer = False
+            self.rusher = True
+        elif self.rc.get_position() == self.core_pos:
             self.healer = True
             self.rusher = False
         else:
             self.healer = False
-            if rc.get_current_round() == 1:
-                self.rusher = False
-            else:
-                self.rusher = True
+            self.rusher = False
 
         if self.rusher:
             self.switch_state(BotState.ATTACK_GOTO)
