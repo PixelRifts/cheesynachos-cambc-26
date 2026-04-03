@@ -1,20 +1,20 @@
 # Test runner config for testing/run_tests.py
 
 # Bot to evaluate
-target_bot = "sprint2_rushing_guards"
+target_bot = "sprint2_rushing_prot"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint2_rushing_prot"]
+opponents = ["sprint2_rushing_guards"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
 maps = ["all"]
 
 # Execution settings
-threads = 20
+threads = 16
 matches_per = 2
-seed = 42
+seed = 45
 save_csv = false
 
 results_dir = "results"
