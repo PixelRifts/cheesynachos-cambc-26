@@ -27,8 +27,11 @@ class Core(Bot):
 
     def turn(self):
         threshold = 2 #+ self.rc.get_current_round() // 80
+        (ti, ax) = self.rc.get_global_resources()
         if self.rc.get_current_round() > 100:
             threshold = 4 + self.rc.get_current_round() // 80
+        if ti > self.rc.get_scale_percent() * 50:
+            threshold = 4 + self.rc.get_current_round() // 50
 
         if self.count < threshold:
             if self.bias_dir is not None:

@@ -77,7 +77,6 @@ class BuilderBot(Bot):
         self.econ_connect_current_run: list[Position] = []
 
     def switch_state(self, state: BotState):
-        print('switched???')
         self.state = state
         self.state_turn_counter = 0
         self.reset_state_variables()
@@ -89,6 +88,9 @@ class BuilderBot(Bot):
             get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), self.sense.symmetries_possible[0])
         
     def turn(self):
+        if self.sense.nearest_to_heal is not None:
+            self.meta_nearest_heal()
+
         match self.state:
             case BotState.ECON_EXPLORE:
                 self.econ_explore()
@@ -123,6 +125,16 @@ class BuilderBot(Bot):
     ### ========================
     ###     State Functions 
     ### ========================
+
+    def meta_nearest_heal(self):
+        if self.rc.get_hp() < self.rc.get_max_hp():
+            if self.rc.can_heal(self.rc.get_position()):
+                self.rc.heal(self.rc.get_position())
+            return
+        if self.rc.get_position().distance_squared(self.sense.nearest_to_heal) > GameConstants.ACTION_RADIUS_SQ:
+            pathfind.fast_pathfind_to(self.rc, self.sense, self.sense.nearest_to_heal)
+        if self.rc.can_heal(self.sense.nearest_to_heal):
+            self.rc.heal(self.sense.nearest_to_heal)
 
     def econ_explore(self):
         my_pos = self.rc.get_position()
@@ -192,7 +204,9 @@ class BuilderBot(Bot):
             adj = self.econ_target_ore.add(d)
 
             if adj == self.pathfind_target: continue
-            if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()): continue
+            if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()):
+                valid_count += 1
+                continue
             if not self.rc.is_in_vision(adj): continue
             print('wall ', d)
 
@@ -213,8 +227,8 @@ class BuilderBot(Bot):
                         valid_count += 1
                 return
         
-        print('after wall checks')
         if valid_count != 3: return
+        print('after wall checks')
         # Validate Position
         if self.rc.get_position() == self.econ_target_ore:
             move_dir = self.econ_target_ore.direction_to(self.pathfind_target)
@@ -248,14 +262,12 @@ class BuilderBot(Bot):
     def econ_connect(self):
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or self.econ_connect_protect_target == self.econ_connect_current_target:
             if self.econ_connect_current_is_final:
-                print('final out')
                 self.switch_state(BotState.ECON_EXPLORE)
                 self.econ_explore_dir = biased_random_dir(self.rc)
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 return
 
             # Compute and cache target because it's wasteful to do everytime we enter this procedure
-            print('compute and cache')
             if self.econ_connect_saved_target is None:
                 self.econ_connect_protect_target = self.rc.get_position() if self.econ_connect_launcher_count == 0 or random.randint(0, 3) <= 1 else None
                 self.econ_connect_saved_target, self.econ_connect_saved_is_final = self.compute_next_bridge_target(-1)
@@ -267,11 +279,9 @@ class BuilderBot(Bot):
                 self.econ_connect_saved_is_bridge = self.should_bridge_heuristic(self.rc.get_position(), self.econ_connect_saved_target)
             
             if self.econ_connect_protect_target is not None:
-                print('validate launcher prot')
                 if not self.is_launcher_protected(self.econ_connect_protect_target):
                     dir = get_best_placable_adj_with_diag(self.rc, self.econ_connect_protect_target, self.enemy_core_pos)
                     launcher_pos = self.econ_connect_protect_target.add(dir)
-                    print('pos picked', launcher_pos)
                     self.rc.draw_indicator_dot(launcher_pos, 255, 0, 0)
                     if not try_destroy(self.rc, self.sense, self.econ_connect_protect_target, launcher_pos):
                         return
@@ -281,7 +291,6 @@ class BuilderBot(Bot):
                         return
                     self.rc.build_launcher(launcher_pos)
 
-            print('possibly build bridge')
             if self.econ_connect_saved_is_bridge:
                 if not (self.sense.is_allied(self.rc.get_position()) and self.sense.get_entity(self.rc.get_position()) == EntityType.BRIDGE):
                     if not try_destroy(self.rc, self.sense, self.rc.get_position(), self.rc.get_position()):
@@ -292,7 +301,6 @@ class BuilderBot(Bot):
                 self.rc.build_bridge(self.rc.get_position(), self.econ_connect_saved_target)
                 self.econ_connect_current_run.append(self.rc.get_position())
             
-            print('cached commit ', self.econ_connect_current_target)
             # Commit the cached target, then it'll be fine :)
             self.econ_connect_current_target = self.econ_connect_saved_target
             self.econ_connect_current_is_bridge = self.econ_connect_saved_is_bridge
@@ -302,7 +310,6 @@ class BuilderBot(Bot):
             self.econ_connect_saved_is_bridge = False
             self.econ_connect_saved_is_final = False
         
-        print('pathfind to next ', self.econ_connect_current_target)
         if self.econ_connect_current_is_bridge:
             if self.econ_connect_current_is_final:
                 self.switch_state(BotState.ECON_EXPLORE)
