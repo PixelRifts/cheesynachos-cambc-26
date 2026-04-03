@@ -115,6 +115,8 @@ class BuilderBot(Bot):
         self.econ_connect_came_from_placement: bool = False
 
         self.defence_heal_target: Position = None
+        self.defence_cut_alt_pathing: bool = False
+        self.defence_cut_target: Position = None
 
         self.attack_target: Position = None
         self.attack_replace_blacklist = set()
@@ -452,13 +454,75 @@ class BuilderBot(Bot):
 
 
     def defence_healer(self):
-        core_bldg = self.rc.get_tile_building_id(self.core_pos)
-        cut_target = self.find_supply_cut_target()
-        if cut_target is not None:
+        if self.defence_cut_alt_pathing:
             if DEBUG_DEFENCE_HEALER:
-                print(f"[CUT] cut target selected {cut_target}")
-            self.defence_heal_target = cut_target
-        elif core_bldg is not None and self.rc.get_hp(core_bldg) < self.rc.get_max_hp(core_bldg):
+                print("[CUT] laying alternate return path to core")
+            (got_to_core, _) = pathfind.preemptable_cardinal_pathfind_to(self.rc, self.core_pos, True)
+            if got_to_core:
+                self.defence_cut_alt_pathing = False
+            return
+
+        if self.defence_cut_target is None:
+            cut_target = self.find_supply_cut_target()
+            if cut_target is not None:
+                if DEBUG_DEFENCE_HEALER:
+                    print(f"[CUT] cut target selected {cut_target}")
+                self.defence_cut_target = cut_target
+
+        else:
+            if not self.is_cut_target(self.defence_cut_target):
+                self.defence_cut_target = None
+            else:
+                if not self.rc.is_in_vision(self.defence_cut_target):
+                    if DEBUG_DEFENCE_HEALER:
+                        print(f"[CUT] target out of vision, pathing to {self.defence_cut_target}")
+                    pathfind.fast_pathfind_to(self.rc, self.defence_cut_target)
+                    return
+
+                cut_bldg = self.rc.get_tile_building_id(self.defence_cut_target)
+
+                if cut_bldg is None:
+                    if self.try_place_cut_launcher(self.defence_cut_target):
+                        if DEBUG_DEFENCE_HEALER:
+                            print(f"[CUT] launcher placed at/near cut tile {self.defence_cut_target}")
+                        self.defence_cut_target = None
+                        self.defence_cut_alt_pathing = True
+                        return
+                    self.defence_cut_target = None
+                else:
+                    cut_allied = self.rc.get_team(cut_bldg) == self.rc.get_team()
+                    if self.rc.get_position() != self.defence_cut_target:
+                        if DEBUG_DEFENCE_HEALER:
+                            print(f"[CUT] moving onto feeder tile {self.defence_cut_target}")
+                        pathfind.fast_pathfind_to(self.rc, self.defence_cut_target)
+                        return
+
+                    if cut_allied:
+                        if self.rc.can_destroy(self.defence_cut_target):
+                            if DEBUG_DEFENCE_HEALER:
+                                print(f"[CUT] destroying feeder from tile {self.defence_cut_target}")
+                            self.rc.destroy(self.defence_cut_target)
+                            sense.remove_edges_from(self.defence_cut_target)
+                            return
+                    else:
+                        if self.rc.can_fire(self.defence_cut_target):
+                            if DEBUG_DEFENCE_HEALER:
+                                print(f"[CUT] firing feeder from tile {self.defence_cut_target}")
+                            self.rc.fire(self.defence_cut_target)
+                            sense.remove_edges_from(self.defence_cut_target)
+                            return
+
+                    if self.try_place_cut_launcher(self.defence_cut_target):
+                        if DEBUG_DEFENCE_HEALER:
+                            print(f"[CUT] launcher placed at/near cut tile {self.defence_cut_target}")
+                        self.defence_cut_target = None
+                        self.defence_cut_alt_pathing = True
+                        return
+
+                    return
+
+        core_bldg = self.rc.get_tile_building_id(self.core_pos)
+        if core_bldg is not None and self.rc.get_hp(core_bldg) < self.rc.get_max_hp(core_bldg):
             if DEBUG_DEFENCE_HEALER:
                 print(f"[HEAL] core damaged hp={self.rc.get_hp(core_bldg)}/{self.rc.get_max_hp(core_bldg)}")
             self.defence_heal_target = self.core_pos
@@ -472,14 +536,20 @@ class BuilderBot(Bot):
                 if DEBUG_DEFENCE_HEALER:
                     print("[CORE] no target, returning to core")
                 pathfind.fast_pathfind_to(self.rc, self.core_pos)
+                return
 
         if self.defence_heal_target is not None:
+            if self.is_cut_target(self.defence_heal_target):
+                self.defence_heal_target = None
+                pathfind.fast_pathfind_to(self.rc, self.core_pos)
+                return
+
             if not self.rc.is_in_vision(self.defence_heal_target):
                 if DEBUG_DEFENCE_HEALER:
                     print(f"[DEF_HEAL] target out of vision, pathing to {self.defence_heal_target}")
                 pathfind.fast_pathfind_to(self.rc, self.defence_heal_target)
                 return
-            
+
             bldg = self.rc.get_tile_building_id(self.defence_heal_target)
             if bldg is None:
                 if DEBUG_DEFENCE_HEALER:
@@ -489,20 +559,10 @@ class BuilderBot(Bot):
                 return
 
             allied = self.rc.get_team(bldg) == self.rc.get_team()
-            if self.rc.get_position() != self.defence_heal_target:
-                if DEBUG_DEFENCE_HEALER:
-                    print(f"[CUT] moving onto feeder tile {self.defence_heal_target}")
-                pathfind.fast_pathfind_to(self.rc, self.defence_heal_target)
+            if not allied:
+                self.defence_heal_target = None
                 return
 
-            if self.rc.can_fire(self.defence_heal_target):
-                if DEBUG_DEFENCE_HEALER:
-                    print(f"[CUT] firing feeder from tile {self.defence_heal_target}")
-                self.rc.fire(self.defence_heal_target)
-                sense.remove_edges_from(self.defence_heal_target)
-                self.defence_heal_target = None
-            return
-            
             if not is_adjacent_with_diag(self.rc.get_position(), self.defence_heal_target):
                 if DEBUG_DEFENCE_HEALER:
                     print(f"[DEF_HEAL] allied target not adjacent, moving to {self.defence_heal_target}")
@@ -512,15 +572,35 @@ class BuilderBot(Bot):
                 if DEBUG_DEFENCE_HEALER:
                     print(f"[DEF_HEAL] healing {self.defence_heal_target}")
                 self.rc.heal(self.defence_heal_target)
-                if  (self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg)):
+                if self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg):
                     if DEBUG_DEFENCE_HEALER:
                         print(f"[DEF_HEAL] target fully healed {self.defence_heal_target}")
-                    self.defence_heal_target = None                    
+                    self.defence_heal_target = None
             return
 
         if DEBUG_DEFENCE_HEALER:
             print("[DEF_HEAL] fallback path to core")
         pathfind.fast_pathfind_to(self.rc, self.core_pos)
+
+    def try_place_cut_launcher(self, cut_pos: Position) -> bool:
+        if cut_pos is None:
+            return False
+
+        placements = [cut_pos]
+        fallback_dir = get_best_placable_adj_with_diag(self.rc, cut_pos, self.enemy_core_pos)
+        if fallback_dir != Direction.CENTRE:
+            placements.append(cut_pos.add(fallback_dir))
+
+        for place in placements:
+            if not is_in_map(place, self.rc.get_map_width(), self.rc.get_map_height()):
+                continue
+
+            if try_destroy(self.rc, self.rc.get_position(), place):
+                if self.rc.can_build_launcher(place):
+                    self.rc.build_launcher(place)
+                    return True
+
+        return False
 
     def find_heal_target(self):
         best_heal_target = None
@@ -531,6 +611,8 @@ class BuilderBot(Bot):
             allied = self.rc.get_team(bldg) == self.rc.get_team()
 
             if allied and (self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg)):
+                if self.is_cut_target(p):
+                    continue
                 d = p.distance_squared(self.core_pos)
                 if d < best_heal_dist:
                     best_heal_dist = d
@@ -557,7 +639,8 @@ class BuilderBot(Bot):
             if p.distance_squared(self.core_pos) > CORE_DANGER:
                 continue
 
-            for feeder in sense.get_feeders_of(p):
+            for d in CARDINAL_DIRECTIONS:
+                feeder = p.add(d)
                 if not is_in_map(feeder, self.rc.get_map_width(), self.rc.get_map_height()):
                     continue
                 if not self.rc.is_in_vision(feeder):
@@ -580,6 +663,37 @@ class BuilderBot(Bot):
             print(f"[DEF_HEAL] best feeder near core is {best_cut_target} (d2={best_cut_dist})")
 
         return best_cut_target
+
+    def is_cut_target(self, feeder: Position) -> bool:
+        if feeder is None:
+            return False
+        if not is_in_map(feeder, self.rc.get_map_width(), self.rc.get_map_height()):
+            return False
+        if not self.rc.is_in_vision(feeder):
+            return False
+
+        feeder_bldg = self.rc.get_tile_building_id(feeder)
+        if feeder_bldg is None:
+            return False
+
+        feeder_entt = self.rc.get_entity_type(feeder_bldg)
+        if feeder_entt not in (EntityType.CONVEYOR, EntityType.SPLITTER, EntityType.BRIDGE):
+            return False
+
+        for bldg in self.rc.get_nearby_buildings():
+            p = self.rc.get_position(bldg)
+            if not self.rc.is_in_vision(p):
+                continue
+            if self.rc.get_team(bldg) == self.rc.get_team():
+                continue
+            if self.rc.get_entity_type(bldg) not in (EntityType.SENTINEL, EntityType.GUNNER):
+                continue
+            if p.distance_squared(self.core_pos) > CORE_DANGER:
+                continue
+            if is_adjacent(p, feeder):
+                return True
+
+        return False
 
 
 
