@@ -29,6 +29,8 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position) -> bool
             print('cant destroy', p)
     else:
         if allied:
+            if not is_adjacent_with_diag(rc.get_position(), p):
+                pathfind.fast_pathfind_to(rc, sense, p)
             if rc.can_destroy(p):
                 rc.destroy(p)
         else:

@@ -8,7 +8,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 # Implement BUG + BFS Pathfinding
 from heapq import heappush, heappop
 
-BARRIER_COST = 10
+BARRIER_COST = 20
 
 class PFState:
     def __init__(self):
@@ -73,7 +73,8 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
             env = sense.get_env(next_pos)
             entt = sense.get_entity(next_pos)
             allied = sense.is_allied(next_pos)
-            if not is_entt_pathable(entt, allied) or env == Environment.WALL:
+            if not is_entt_pathable(entt, allied) or env == Environment.WALL or \
+                (rc.get_tile_builder_bot_id(next_pos) is not None and rc.get_tile_builder_bot_id(next_pos) != rc.get_id()):
                 pf_state.reset()
         else:
             pf_state.result_path.pop(0)
