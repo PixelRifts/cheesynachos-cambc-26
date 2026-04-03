@@ -8,7 +8,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 # Implement BUG + BFS Pathfinding
 from heapq import heappush, heappop
 
-BARRIER_COST = 10
+BARRIER_COST = 20
 
 class PFState:
     def __init__(self):
@@ -22,6 +22,7 @@ class PFState:
         self.open_set = []
         self.came_from = {}
         self.g_score = {}
+        self.failed = False
 
         self.result_path = []
 
@@ -47,6 +48,10 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
     if pf_state.astar_active:
         step_astar_internal(rc, sense, max_expansions=50)
 
+    if not pf_state.astar_active and pf_state.failed:
+        pf_state.result_path = []
+        return
+
     if pf_state.result_path:
         # follow path it
         next_pos = pf_state.result_path[0]
@@ -68,7 +73,8 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
             env = sense.get_env(next_pos)
             entt = sense.get_entity(next_pos)
             allied = sense.is_allied(next_pos)
-            if not is_entt_pathable(entt, allied) or env == Environment.WALL:
+            if not is_entt_pathable(entt, allied) or env == Environment.WALL or \
+                (rc.get_tile_builder_bot_id(next_pos) is not None and rc.get_tile_builder_bot_id(next_pos) != rc.get_id()):
                 pf_state.reset()
         else:
             pf_state.result_path.pop(0)
@@ -138,6 +144,10 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
 
         expansions += 1
 
+    if not open_set:
+        # no path exists
+        pf_state.astar_active = False
+        pf_state.failed = True
 
 # Cardinal Pathfind
 
@@ -157,6 +167,10 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     # continue A* for a limited budget
     if pf_state.astar_active:
         step_cardinal_astar_internal(rc, sense, max_expansions=50)
+    
+    if not pf_state.astar_active and pf_state.failed:
+        pf_state.result_path = []
+        return
 
     if pf_state.result_path:
         next_pos = pf_state.result_path[0]
@@ -263,7 +277,8 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 entt = sense.get_entity(nxt)
                 allied = sense.is_allied(nxt)
                 if env == Environment.WALL: continue
-                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
+                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != pf_state.goal: continue
+                if allied and entt in ENTITY_TRANSPORT: continue
 
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
@@ -282,9 +297,11 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
             rc.draw_indicator_dot(nxt, 255, 0, 0)
 
         expansions += 1
-
-
-
+    
+    if not open_set:
+        # no path exists
+        pf_state.astar_active = False
+        pf_state.failed = True
 
 
 

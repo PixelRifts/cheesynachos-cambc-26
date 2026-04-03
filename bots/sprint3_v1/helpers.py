@@ -93,7 +93,7 @@ def is_pos_turretable(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     allied = rc.get_team() == rc.get_team(bldg)
     entt = rc.get_entity_type(bldg)
-    return (not allied and entt in ENTITY_TRANSPORT) or (allied and entt in ENTITY_TRIVIAL)
+    return (not allied and entt in ENTITY_WALKABLE) or (allied and entt in ENTITY_TRIVIAL)
 
 def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
     if entt in ENTITY_WALKABLE: return True
@@ -110,8 +110,32 @@ def is_friendly_transport(rc: Controller, pos: Position) -> bool:
     entt = rc.get_entity_type(bldg)
     return allied and entt in ENTITY_TRANSPORT
 
+def is_enemy_transport(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return False
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return False
+    allied = rc.get_team(bldg) == rc.get_team()
+    entt = rc.get_entity_type(bldg)
+    return not allied and entt in ENTITY_TRANSPORT
+
 
 # Adjacency Stuff
+
+def get_best_placable_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        if not (is_pos_turretable(rc, p) and not is_enemy_transport(rc, p)): continue
+        dist = p.distance_squared(b)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
 
 def get_best_pathable_adj_with_diag(rc: Controller, pos: Position, heu: Position) -> Direction:
     best_dist = 1000000
@@ -137,13 +161,13 @@ def get_empty_adj(rc: Controller, a: Position) -> Direction:
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue
         if is_friendly_transport(rc, p): continue
-        bb = rc.get_tile_builder_bot_id(p)
-        if bb is not None: continue
+        # bb = rc.get_tile_builder_bot_id(p)
+        # if bb is not None: continue
         if is_pos_pathable(rc, p): return d
     return Direction.CENTRE
 
 def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
-    best_dist = 1000000
+    best_score = -1000000
     best_dir = Direction.CENTRE
     for d in CARDINAL_DIRECTIONS:
         p = a.add(d)
@@ -151,11 +175,12 @@ def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
         if not rc.is_in_vision(p): continue
         if not is_pos_pathable(rc, p): continue
         if is_friendly_transport(rc, p): continue
-        bb = rc.get_tile_builder_bot_id(p)
-        if bb is not None: continue
-        dist = p.distance_squared(b)
-        if dist < best_dist:
-            best_dist = dist
+        # bb = rc.get_tile_builder_bot_id(p)
+        # if bb is not None and rc.get_id(): continue
+
+        score = -p.distance_squared(b) + (-100 if rc.get_entity_type(rc.get_tile_building_id(p)) == EntityType.BARRIER else 0)
+        if score > best_score:
+            best_score = score
             best_dir = d
     return best_dir
 

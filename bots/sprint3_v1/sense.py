@@ -49,6 +49,9 @@ class Sense:
         self.ally_builders:  Set[Position] = set()
         self.enemy_builders: Set[Position] = set()
         self.enemy_core_found: Position = None
+
+        self.nearest_to_heal: Position = None
+        self.nearest_to_heal_dist = 100000000
     
         self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
         if self.map_width > self.map_height:
@@ -95,21 +98,27 @@ class Sense:
         return self.map[self.idx(pos)] != 0
 
     def update(self):
-        for s in self.env_index.values():
-            s.clear()
-        for s in self.entt_index.values():
-            s.clear()
+        for s in self.env_index.values():  s.clear()
+        for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
         self.enemy_builders.clear()
-        
+        self.nearest_to_heal: Position = None
+        self.nearest_to_heal_dist = 100000000
+
         self.nearby_tiles = self.rc.get_nearby_tiles()
         for t in self.nearby_tiles:
             # Save Env and Buildings
             env = self.rc.get_tile_env(t)
             bldg = self.rc.get_tile_building_id(t)
             entt = None if bldg is None else self.rc.get_entity_type(bldg)
-            allied = True if bldg is None else self.rc.get_team(bldg) == self.rc.get_team()
+            allied = False if bldg is None else self.rc.get_team(bldg) == self.rc.get_team()
             self.set_entt_and_env(t, entt, env, allied)
+
+            if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
+                d = self.rc.get_position().distance_squared(t)
+                if d < self.nearest_to_heal_dist:
+                    self.nearest_to_heal_dist = d
+                    self.nearest_to_heal = t
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
