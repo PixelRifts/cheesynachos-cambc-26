@@ -1,11 +1,11 @@
 # Test runner config for testing/run_tests.py
 
 # Bot to evaluate
-target_bot = "sprint2_rushing_prot"
+target_bot = "sprint2_rushing_patrols"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint2_rushing_guards"]
+opponents = ["sprint2_rushing_prot"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
