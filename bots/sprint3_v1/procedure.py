@@ -5,7 +5,11 @@ from cambc import Controller, Environment, Position, Direction, EntityType
 
 def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position) -> bool:
     if not sense.is_seen(p):
-        pathfind.fast_pathfind_to(rc, p)
+        pathfind.fast_pathfind_to(rc, sense, p)
+        return False
+    
+    if not rc.is_in_vision(p):
+        pathfind.fast_pathfind_to(rc, sense, p)
         return False
     
     bldg = rc.get_tile_building_id(p)
