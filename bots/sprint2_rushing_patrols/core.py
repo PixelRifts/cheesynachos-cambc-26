@@ -38,19 +38,15 @@ class Core(Bot):
     def turn(self):
         turn = self.rc.get_current_round()
 
-        if self.sees_enemy_builder_bot() and self.healer_count < 2:
-            if self.spawn_healer():
-                self.healer_count += 1
-                return
-        
+        if self.healer_needed() or (self.sees_enemy_builder_bot() and self.healer_count < 1):
+            self.spawn_healer()
+            
         target = 2 + turn // 80
         if self.econ_count + self.rush_count < target:        
             if 2*self.econ_count <= self.rush_count:
                 self.spawn_econ()
-                self.econ_count += 1
                 return
             self.spawn_rush()
-            self.rush_count += 1
             return
 
     def spawn_econ(self):
@@ -60,26 +56,61 @@ class Core(Bot):
             spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
+            self.econ_count += 1
 
     def spawn_rush(self):
         spawn_pos = self.rc.get_position().add(self.rush_dir)
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
+            self.rush_count += 1
 
-    def spawn_healer(self) -> bool:
+    def spawn_healer(self):
         spawn_pos = self.rc.get_position()
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
-            return True
+            self.healer_count += 1
+
+    def healer_needed(self) -> bool:
+        for bldg in self.rc.get_nearby_buildings():
+            if self.rc.get_team(bldg) != self.rc.get_team():
+                continue
+
+            # bldg_pos = self.rc.get_position(bldg)
+            hp = self.rc.get_hp(bldg)
+            max_hp = self.rc.get_max_hp(bldg)
+
+            # Effective HP logic is temporarily disabled.
+            # effective_hp = hp
+            # if self.rc.is_in_vision(bldg_pos):
+            #     bb_here = self.rc.get_tile_builder_bot_id(bldg_pos)
+            #     if bb_here is not None and self.rc.get_team(bb_here) == self.rc.get_team():
+            #         effective_hp += 4
+            # for d in DIRECTIONS:
+            #     adj = bldg_pos.add(d)
+            #     if not self.rc.is_in_vision(adj):
+            #         continue
+            #     bb = self.rc.get_tile_builder_bot_id(adj)
+            #     if bb is None:
+            #         continue
+            #     if self.rc.get_team(bb) == self.rc.get_team():
+            #         effective_hp += 4
+
+            if hp * 2 < max_hp:
+                return True
+
         return False
 
     def sees_enemy_builder_bot(self) -> bool:
         for t in self.rc.get_nearby_tiles():
+            if not self.rc.is_in_vision(t):
+                continue
+
             bb = self.rc.get_tile_builder_bot_id(t)
             if bb is None:
                 continue
             if self.rc.get_team(bb) != self.rc.get_team():
                 return True
+
         return False
 
     def end_turn(self):

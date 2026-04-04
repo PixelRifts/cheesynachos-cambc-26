@@ -53,7 +53,7 @@ class BotState(Enum):
     ATTACK_BLOCK_ORE = "Block"
     ATTACK_HIJACK    = "Hijack"
 
-    DEFENCE_HEALER = "Healer"
+    CORE_HEALER = "Core Healer"
 
 
 class BuilderBot(Bot):
@@ -90,7 +90,7 @@ class BuilderBot(Bot):
             self.switch_state(BotState.ATTACK_GOTO)
             self.pathfind_target = self.enemy_core_pos
         elif self.healer:
-            self.switch_state(BotState.DEFENCE_HEALER)
+            self.switch_state(BotState.CORE_HEALER)
         else:
             self.switch_state(BotState.ECON_EXPLORE)
             self.econ_explore_dir = self.core_pos.direction_to(self.rc.get_position())
@@ -114,7 +114,7 @@ class BuilderBot(Bot):
         self.econ_protect_return_loc = self.rc.get_position()
         self.econ_connect_came_from_placement: bool = False
 
-        self.defence_heal_target: Position = None
+        self.core_heal_spot: Position = None
 
         self.attack_target: Position = None
         self.attack_replace_blacklist = set()
@@ -153,8 +153,8 @@ class BuilderBot(Bot):
             case BotState.ECON_NUKE:
                 self.econ_nuke()
             
-            case BotState.DEFENCE_HEALER:
-                self.defence_healer()
+            case BotState.CORE_HEALER:
+                self.core_healer()
 
             case BotState.ATTACK_GOTO:
                 self.attack_goto()
@@ -451,8 +451,13 @@ class BuilderBot(Bot):
 
 
 
-    def defence_healer(self):
-        def has_adjacent_builder_bot(pos: Position) -> bool:
+    def core_healer(self):
+        def not_my_problem(pos: Position) -> bool:
+            if self.rc.is_in_vision(pos):
+                bb = self.rc.get_tile_builder_bot_id(pos)
+                if bb is not None and bb != self.rc.get_id() and self.rc.get_team(bb) == self.rc.get_team():
+                    return True
+
             for d in DIRECTIONS:
                 adj = pos.add(d)
                 if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()):
@@ -460,11 +465,15 @@ class BuilderBot(Bot):
                 if not self.rc.is_in_vision(adj):
                     continue
                 bb = self.rc.get_tile_builder_bot_id(adj)
-                if bb is not None:
+                if bb is None:
+                    continue
+                if bb == self.rc.get_id():
+                    continue
+                if self.rc.get_team(bb) == self.rc.get_team():
                     return True
             return False
 
-        if self.defence_heal_target is None:
+        if self.core_heal_spot is None:
             best_heal_target = None
             best_heal_dist = 10000000
             for bldg in self.rc.get_nearby_buildings():
@@ -473,7 +482,7 @@ class BuilderBot(Bot):
                 allied = self.rc.get_team(bldg) == self.rc.get_team()
                 hp = self.rc.get_hp(bldg)
                 max_hp = self.rc.get_max_hp(bldg)
-                effective_hp = hp + 4 if has_adjacent_builder_bot(p) else hp
+                effective_hp = hp + 4 if not_my_problem(p) else hp
                 
                 if effective_hp < max_hp:
                     self.rc.draw_indicator_dot(p, 255, 0, 0)
@@ -483,30 +492,36 @@ class BuilderBot(Bot):
                         best_heal_dist = d
                         best_heal_target = p
             if best_heal_target is not None:
-                self.defence_heal_target = best_heal_target
+                self.core_heal_spot = best_heal_target
             else:
                 pathfind.fast_pathfind_to(self.rc, self.core_pos)
 
-        if self.defence_heal_target is not None:
-            print('[HEAL]heal target: ', self.defence_heal_target)
-            if not self.rc.is_in_vision(self.defence_heal_target):
-                pathfind.fast_pathfind_to(self.rc, self.defence_heal_target)
+        if self.core_heal_spot is not None:
+            print('[HEAL]heal target: ', self.core_heal_spot)
+            if not self.rc.is_in_vision(self.core_heal_spot):
+                pathfind.fast_pathfind_to(self.rc, self.core_heal_spot)
                 return
             
-            bldg = self.rc.get_tile_building_id(self.defence_heal_target)
+            bldg = self.rc.get_tile_building_id(self.core_heal_spot)
             if bldg is None:
-                self.defence_heal_target = None
+                self.core_heal_spot = None
                 pathfind.fast_pathfind_to(self.rc, self.core_pos)
                 return
             
-            if not is_adjacent_with_diag(self.rc.get_position(), self.defence_heal_target):
-                pathfind.fast_pathfind_to(self.rc, self.defence_heal_target)
+            if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_spot):
+                pathfind.fast_pathfind_to(self.rc, self.core_heal_spot)
 
-            if self.rc.can_heal(self.defence_heal_target):
-                self.rc.heal(self.defence_heal_target)
-            
-            if self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg):
-                self.defence_heal_target = None
+            if self.rc.can_heal(self.core_heal_spot):
+                self.rc.heal(self.core_heal_spot)
+
+            if self.rc.is_in_vision(self.core_heal_spot):
+                bldg = self.rc.get_tile_building_id(self.core_heal_spot)
+                if bldg is None:
+                    self.core_heal_spot = None
+                    return
+
+                if self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg):
+                    self.core_heal_spot = None
 
 
 
