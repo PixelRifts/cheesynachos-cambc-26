@@ -107,7 +107,7 @@ class BuilderBot(Bot):
             get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), self.sense.symmetries_possible[0])
         
     def turn(self):
-        if self.sense.nearest_to_heal is not None:
+        if self.sense.nearest_to_heal is not None and self.state != BotState.ECON_CONNECT:
             self.meta_nearest_heal()
 
         match self.state:
@@ -137,7 +137,7 @@ class BuilderBot(Bot):
                 self.recover_goto_core()
     
     def end_turn(self):
-        self.sense.visualize()
+        # self.sense.visualize()
         print(self.state)
         pass
         
@@ -287,17 +287,21 @@ class BuilderBot(Bot):
                 return
 
             # Compute and cache target because it's wasteful to do everytime we enter this procedure
+            
             if self.econ_connect_saved_target is None:
-                self.econ_connect_protect_target = self.rc.get_position() if self.econ_connect_launcher_count == 0 or random.randint(0, 3) <= 1 else None
+                print('update target')
                 self.econ_connect_saved_target, self.econ_connect_saved_is_final = self.compute_next_bridge_target(-1)
+                self.econ_connect_protect_target = self.rc.get_position() # if self.econ_connect_current_target is None or self.econ_connect_saved_is_final else None
                 if self.econ_connect_saved_target is None:
                     self.switch_state(BotState.ECON_EXPLORE)
                     self.econ_explore_dir = biased_random_dir(self.rc)
                     self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                     return
-                self.econ_connect_saved_is_bridge = self.should_bridge_heuristic(self.rc.get_position(), self.econ_connect_saved_target)
+                self.econ_connect_saved_is_bridge = self.should_bridge_heuristic(self.rc.get_position(), self.econ_connect_saved_target) or self.econ_connect_saved_is_final
+            self.rc.draw_indicator_dot(self.econ_connect_saved_target, 0, 0, 255)
             
             if self.econ_connect_protect_target is not None:
+                print('launcher_target')
                 if not self.is_launcher_protected(self.econ_connect_protect_target):
                     dir = get_best_placable_adj_with_diag(self.rc, self.econ_connect_protect_target, self.enemy_core_pos)
                     launcher_pos = self.econ_connect_protect_target.add(dir)
@@ -306,20 +310,27 @@ class BuilderBot(Bot):
                         return
                     if not self.rc.can_build_launcher(launcher_pos):
                         (ti, ax) = self.rc.get_global_resources()
-                        print(ti, 'v', self.rc.get_launcher_cost()[0] * self.rc.get_scale_percent())
+                        print(ti, 'v', self.rc.get_launcher_cost()[0])
                         return
                     self.rc.build_launcher(launcher_pos)
 
+            print('pre-bridge build')
             if self.econ_connect_saved_is_bridge:
                 if not (self.sense.is_allied(self.rc.get_position()) and self.sense.get_entity(self.rc.get_position()) == EntityType.BRIDGE):
                     if not try_destroy(self.rc, self.sense, self.rc.get_position(), self.rc.get_position()):
                         return
+            
+                (ti, ax) = self.rc.get_global_resources()
+                if ti < 10: return
+                
                 if not self.rc.can_build_bridge(self.rc.get_position(), self.econ_connect_saved_target):
                     return
 
                 self.rc.build_bridge(self.rc.get_position(), self.econ_connect_saved_target)
+                print('built bridge')
                 self.econ_connect_current_run.append(self.rc.get_position())
             
+            print('committed')
             # Commit the cached target, then it'll be fine :)
             self.econ_connect_current_target = self.econ_connect_saved_target
             self.econ_connect_current_is_bridge = self.econ_connect_saved_is_bridge
@@ -338,6 +349,8 @@ class BuilderBot(Bot):
 
             pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
         else:
+            (ti, ax) = self.rc.get_global_resources()
+            if ti < 10: return
             pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True)
 
 
@@ -354,13 +367,11 @@ class BuilderBot(Bot):
 
             for d in DIRECTIONS:
                 adj = pos.add(d)
-                if not self.rc.is_in_vision(adj):
-                    continue
+                if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
+                if not self.rc.is_in_vision(adj): continue
                 bb = self.rc.get_tile_builder_bot_id(adj)
-                if bb is None:
-                    continue
-                if bb == self.rc.get_id():
-                    continue
+                if bb is None: continue
+                if bb == self.rc.get_id(): continue
                 if self.rc.get_team(bb) == self.rc.get_team():
                     return True # an allied builder bot adjacent to location.
             return False # vulnerable building that needs healing
@@ -385,15 +396,19 @@ class BuilderBot(Bot):
                         best_heal_target = p
             if best_heal_target is not None:
                 heal_dir = get_best_empty_adj_with_diag(self.rc, best_heal_target, self.rc.get_position())
-                self.core_heal_target = best_heal_target.add(heal_dir)
+                self.pathfind_target = best_heal_target.add(heal_dir)
+                self.core_heal_target = best_heal_target
             else:
                 pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
                 return
         
+        
         if self.core_heal_target is not None:
+            self.rc.draw_indicator_dot(self.core_heal_target, 0, 255, 0)
+
             print('[HEAL]heal target: ', self.core_heal_target)
             if not self.rc.is_in_vision(self.core_heal_target):
-                pathfind.fast_pathfind_to(self.rc, self.core_heal_target)
+                pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
                 return
             
             bldg = self.rc.get_tile_building_id(self.core_heal_target)
@@ -403,13 +418,16 @@ class BuilderBot(Bot):
                 return
             
             if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_target):
-                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_heal_target)
-                print('moving to heal target' + str(self.core_heal_target))
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+                print('moving to heal target' + str(self.pathfind_target))
                 # no return - allow immediate heal
 
+            print('hai')
             if self.rc.can_heal(self.core_heal_target):
                 self.rc.heal(self.core_heal_target)
                 # no return - allow checks
+                print('healed', self.core_heal_target)
+                
 
             if self.rc.is_in_vision(self.core_heal_target):
                 bldg = self.rc.get_tile_building_id(self.core_heal_target)

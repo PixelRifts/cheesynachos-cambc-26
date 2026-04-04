@@ -9,6 +9,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 from heapq import heappush, heappop
 
 BARRIER_COST = 20
+DEBUG_DRAW = False
 
 class PFState:
     def __init__(self):
@@ -99,15 +100,15 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
             continue
 
         if current == goal:
-            rc.draw_indicator_dot(current, 0, 255, 0)
+            if DEBUG_DRAW: rc.draw_indicator_dot(current, 0, 255, 0)
             path = reconstruct_path(came_from, current)
             pf_state.result_path = path
             pf_state.result_path.pop(0)
             if pf_state.result_path:
-                rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
+                if DEBUG_DRAW: rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
 
             for i in range(len(pf_state.result_path) - 1):
-                rc.draw_indicator_line(
+                if DEBUG_DRAW: rc.draw_indicator_line(
                     pf_state.result_path[i],
                     pf_state.result_path[i + 1],
                     0, 255, 0
@@ -141,7 +142,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
                 open_set,
                 (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
             )
-            rc.draw_indicator_dot(nxt, 255, 0, 0)
+            if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
 
         expansions += 1
 
@@ -186,16 +187,24 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
                 rc.get_direction(rc.get_tile_building_id(cur)) == conveyor_dir
             )
         )
+        print(needs_fix)
 
         if needs_fix:
+            print('hi')
             if entt is not None:
+                print('hi2')
                 allied = sense.is_allied(cur)
                 if allied:
+                    print('hi ally')
                     if rc.can_destroy(cur): rc.destroy(cur)
                 else:
-                    if rc.can_fire(cur): rc.fire(cur)
+                    print('hi bad')
+                    if rc.can_fire(cur):
+                        print('fired')
+                        rc.fire(cur)
                 
             if rc.can_build_conveyor(cur, d):
+                print('built conveyor')
                 rc.build_conveyor(cur, d)
                 needs_fix = False
         if needs_fix: return False
@@ -252,15 +261,15 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
             continue
 
         if current == goal:
-            rc.draw_indicator_dot(current, 0, 255, 0)
+            if DEBUG_DRAW: rc.draw_indicator_dot(current, 0, 255, 0)
             path = reconstruct_path(came_from, current)
             pf_state.result_path = path
             pf_state.result_path.pop(0)
             if pf_state.result_path:
-                rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
+                if DEBUG_DRAW: rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
 
             for i in range(len(pf_state.result_path) - 1):
-                rc.draw_indicator_line(
+                if DEBUG_DRAW: rc.draw_indicator_line(
                     pf_state.result_path[i],
                     pf_state.result_path[i + 1],
                     0, 255, 0
@@ -295,7 +304,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 open_set,
                 (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
             )
-            rc.draw_indicator_dot(nxt, 255, 0, 0)
+            if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
 
         expansions += 1
     
