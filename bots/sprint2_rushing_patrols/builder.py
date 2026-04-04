@@ -452,6 +452,18 @@ class BuilderBot(Bot):
 
 
     def defence_healer(self):
+        def has_adjacent_builder_bot(pos: Position) -> bool:
+            for d in DIRECTIONS:
+                adj = pos.add(d)
+                if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()):
+                    continue
+                if not self.rc.is_in_vision(adj):
+                    continue
+                bb = self.rc.get_tile_builder_bot_id(adj)
+                if bb is not None:
+                    return True
+            return False
+
         if self.defence_heal_target is None:
             best_heal_target = None
             best_heal_dist = 10000000
@@ -459,10 +471,13 @@ class BuilderBot(Bot):
                 p = self.rc.get_position(bldg)
                 
                 allied = self.rc.get_team(bldg) == self.rc.get_team()
+                hp = self.rc.get_hp(bldg)
+                max_hp = self.rc.get_max_hp(bldg)
+                effective_hp = hp + 4 if has_adjacent_builder_bot(p) else hp
                 
-                if self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
+                if effective_hp < max_hp:
                     self.rc.draw_indicator_dot(p, 255, 0, 0)
-                if allied and (self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg)):
+                if allied and (effective_hp < max_hp):
                     d = p.distance_squared(self.core_pos)
                     if d < best_heal_dist:
                         best_heal_dist = d
@@ -473,6 +488,7 @@ class BuilderBot(Bot):
                 pathfind.fast_pathfind_to(self.rc, self.core_pos)
 
         if self.defence_heal_target is not None:
+            print('[HEAL]heal target: ', self.defence_heal_target)
             if not self.rc.is_in_vision(self.defence_heal_target):
                 pathfind.fast_pathfind_to(self.rc, self.defence_heal_target)
                 return
@@ -488,8 +504,9 @@ class BuilderBot(Bot):
 
             if self.rc.can_heal(self.defence_heal_target):
                 self.rc.heal(self.defence_heal_target)
-                if  (self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg)):
-                    self.defence_heal_target = None
+            
+            if self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg):
+                self.defence_heal_target = None
 
 
 
