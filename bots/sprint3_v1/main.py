@@ -8,8 +8,7 @@ from helpers import RANDOM_SEED
 from core import Core
 from builder import BuilderBot
 from launcher import Launcher
-# from simple_shooter import SimpleShooter
-# from launcher import Launcher
+from simple_shooter import SimpleShooter
 
 class Player:
     def __init__(self):
@@ -26,6 +25,9 @@ class Player:
                 self.brain = BuilderBot(rc)
             elif entt == EntityType.LAUNCHER:
                 self.brain = Launcher(rc)
+            elif entt == EntityType.GUNNER:
+                self.brain = SimpleShooter(rc)
+        
         
         self.brain.start_turn()
         self.brain.turn()

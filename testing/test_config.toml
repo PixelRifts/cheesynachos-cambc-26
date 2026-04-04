@@ -12,9 +12,9 @@ opponents = ["starter", "sprint2_alt2"]
 maps = ["all"]
 
 # Execution settings
-threads = 20
+threads = 15
 matches_per = 1
 seed = 1
-save_csv = false
+save_csv = true
 
 results_dir = "results"

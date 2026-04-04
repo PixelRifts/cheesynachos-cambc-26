@@ -6,16 +6,16 @@ from typing import Optional, Set, Dict
 from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
 
-_ENVIRONMENT_TO_VALUE = {
+ENVIRONMENT_TO_VALUE = {
     None: 0,
     Environment.EMPTY: 1,
     Environment.WALL: 2,
     Environment.ORE_AXIONITE: 3,
     Environment.ORE_TITANIUM: 4,
 }
-_VALUE_TO_ENVIRONMENT = {v: k for k, v in _ENVIRONMENT_TO_VALUE.items()}
+_VALUE_TO_ENVIRONMENT = {v: k for k, v in ENVIRONMENT_TO_VALUE.items()}
 
-_ENTITY_TYPE_TO_VALUE = {
+ENTITY_TYPE_TO_VALUE = {
     None: 0,
     EntityType.CORE: 2,
     EntityType.GUNNER: 3,
@@ -32,7 +32,7 @@ _ENTITY_TYPE_TO_VALUE = {
     EntityType.BARRIER: 14,
     EntityType.MARKER: 15,
 }
-_VALUE_TO_ENTITY_TYPE = {v: k for k, v in _ENTITY_TYPE_TO_VALUE.items()}
+_VALUE_TO_ENTITY_TYPE = {v: k for k, v in ENTITY_TYPE_TO_VALUE.items()}
 
 class Sense:
     def __init__(self, rc: Controller):
@@ -44,10 +44,13 @@ class Sense:
         self.nearby_tiles = []
 
         self.map = array('H', [0] * self.size)
-        self.env_index: Dict[int, Set[Position]] = {v: set() for v in _ENVIRONMENT_TO_VALUE.values()}
-        self.entt_index: Dict[int, Set[Position]] = {v: set() for v in _ENTITY_TYPE_TO_VALUE.values()}
+        self.env_index: Dict[int, Set[Position]] = {v: set() for v in ENVIRONMENT_TO_VALUE.values()}
+        self.entt_index: Dict[int, Set[Position]] = {v: set() for v in ENTITY_TYPE_TO_VALUE.values()}
         self.ally_builders:  Set[Position] = set()
         self.enemy_builders: Set[Position] = set()
+        self.transport_attack_blacklist: Set[Position] = set()
+        self.feed_graph: Dict[Position, Set[Position]] = {}
+        self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
 
         self.nearest_to_heal: Position = None
@@ -64,21 +67,21 @@ class Sense:
 
     def set_env(self, p: Position, env: Environment):
         i = self.idx(p)
-        env_id = _ENVIRONMENT_TO_VALUE[env]
+        env_id = ENVIRONMENT_TO_VALUE[env]
         self.env_index[env_id].add(p)
         self.map[i] = (env_id << 8) | (self.map[i] & 0xFF)
 
     def set_entt(self, p: Position, entity: EntityType, allied: bool):
         i = self.idx(p)
-        entt_type_id = _ENTITY_TYPE_TO_VALUE[entity]
+        entt_type_id = ENTITY_TYPE_TO_VALUE[entity]
         self.entt_index[entt_type_id].add(p)
         self.map[i] = (self.map[i] & 0xFF00) | (entt_type_id << 1) | allied
 
     def set_entt_and_env(self, p: Position, entity: EntityType, env: Environment, allied: bool):
         i = self.idx(p)
 
-        entt_type_id = _ENTITY_TYPE_TO_VALUE[entity]
-        env_id = _ENVIRONMENT_TO_VALUE[env]
+        entt_type_id = ENTITY_TYPE_TO_VALUE[entity]
+        env_id = ENVIRONMENT_TO_VALUE[env]
         self.entt_index[entt_type_id].add(p)
         self.env_index[env_id].add(p)
 
@@ -102,10 +105,15 @@ class Sense:
         for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
         self.enemy_builders.clear()
+        self.transport_attack_blacklist.clear()
         self.nearest_to_heal: Position = None
         self.nearest_to_heal_dist = 100000000
 
         self.nearby_tiles = self.rc.get_nearby_tiles()
+        # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
+        for t in self.nearby_tiles:
+            self.remove_edges_from(t)
+        
         for t in self.nearby_tiles:
             # Save Env and Buildings
             env = self.rc.get_tile_env(t)
@@ -114,6 +122,7 @@ class Sense:
             allied = False if bldg is None else self.rc.get_team(bldg) == self.rc.get_team()
             self.set_entt_and_env(t, entt, env, allied)
 
+            # Nearest Heal target
             if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
                 d = self.rc.get_position().distance_squared(t)
                 if d < self.nearest_to_heal_dist:
@@ -122,7 +131,12 @@ class Sense:
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
-                enemy_core_found = self.rc.get_position(bldg)
+                self.enemy_core_found = self.rc.get_position(bldg)
+                
+            if entt in ENTITY_TRANSPORT:
+                outputs = self.get_outputs(self.rc, t, entt, bldg)
+                for out in outputs:
+                    if out is not None: self.add_edge(t, out)
 
             # Save Builder Bots
             bb = self.rc.get_tile_builder_bot_id(t)
@@ -142,41 +156,90 @@ class Sense:
                         if env_here != env:
                             to_elim.append(sym)
                 self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
-            
+
+        for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
+            if self.is_allied(u):
+                self.transport_attack_blacklist.update(self.get_feeders_of(u))
+        for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.SENTINEL]]:
+            if self.is_allied(u):
+                self.transport_attack_blacklist.update(self.get_feeders_of(u))
+
+    
+    # Feed Graph stuff
+
+    def add_edge(self, src: Position, dst: Position):
+        self.feed_graph.setdefault(src, set()).add(dst)
+        self.reverse_feed_graph.setdefault(dst, set()).add(src)
+
+    def remove_edges_from(self, src: Position):
+        if src in self.feed_graph:
+            for dst in self.feed_graph[src]:
+                if dst in self.reverse_feed_graph:
+                    self.reverse_feed_graph[dst].discard(src)
+                    if not self.reverse_feed_graph[dst]:
+                        del self.reverse_feed_graph[dst]
+            del self.feed_graph[src]
+
+    def get_outputs(self, rc: Controller, pos: Position, entt: EntityType, bldg: int):
+        if entt == EntityType.CONVEYOR or entt == EntityType.ARMOURED_CONVEYOR:
+            d = rc.get_direction(bldg)
+            return [pos.add(d)]
+
+        elif entt == EntityType.BRIDGE:
+            return [rc.get_bridge_target(bldg)]
+
+        elif entt == EntityType.SPLITTER:
+            primary = rc.get_direction(bldg)
+            return [
+                pos.add(primary),
+                pos.add(primary.rotate_left().rotate_left()),
+                pos.add(primary.rotate_right().rotate_right()),
+            ]
+
+        return []
+    
+    def get_feeders_of(self, pos: Position):
+        result = set()
+        stack = [pos]
+
+        while stack:
+            cur = stack.pop()
+            for src in self.reverse_feed_graph.get(cur, []):
+                if src not in result:
+                    result.add(src)
+                    stack.append(src)
+
+        return result
+
+    # Misc
+
+    def eliminate_next_symmetry(self):
+        if len(self.symmetries_possible) > 1:
+            del self.symmetries_possible[0]
 
     def visualize(self):
-        for i, val in enumerate(self.map):
-            if val == 0:
-                continue
+        for src, dsts in self.feed_graph.items():
+            for dst in dsts:
+                self.rc.draw_indicator_line(src, dst, 255, 255, 0)
+        
+        # for i, val in enumerate(self.map):
+        #     if val == 0:
+        #         continue
 
-            x = i % self.map_width
-            y = i // self.map_width
-            pos = Position(x, y)
+        #     x = i % self.map_width
+        #     y = i // self.map_width
+        #     pos = Position(x, y)
 
-            env = (val >> 8) & 0xFF
-            ent = (val >> 1) & 0x7F
-            allied = val & 1
+        #     env = (val >> 8) & 0xFF
+        #     ent = (val >> 1) & 0x7F
+        #     allied = val & 1
 
-            # simple coloring
-            if env:
-                self.rc.draw_indicator_dot(pos, 0, 255, 0)
+        #     # simple coloring
+        #     if env:
+        #         self.rc.draw_indicator_dot(pos, 0, 255, 0)
 
-            if ent:
-                if allied:
-                    self.rc.draw_indicator_dot(pos, 0, 0, 255)
-                else:
-                    self.rc.draw_indicator_dot(pos, 255, 0, 0)
-
-            # optional: draw grid connections
-            if x + 1 < self.map_width:
-                self.rc.draw_indicator_line(
-                    pos,
-                    Position(x+1, y+1),
-                    50, 50, 50
-                )
-            if y + 1 < self.map_height:
-                self.rc.draw_indicator_line(
-                    pos,
-                    Position(x, y+1),
-                    50, 50, 50
-                )
+        #     if ent:
+        #         if allied:
+        #             self.rc.draw_indicator_dot(pos, 0, 0, 255)
+        #         else:
+        #             self.rc.draw_indicator_dot(pos, 255, 0, 0)

@@ -17,6 +17,10 @@ AXIONITE_ENABLE_ROUND = 200
 CORE_DANGER = 20
 BRIDGE_USAGE_CUTOFF = 5
 
+class BotJob(Enum):
+    ECON = "Econ"
+    RUSH = "Rush"
+
 class BotState(Enum):
     ECON_EXPLORE = "Explore"
     ECON_TARGET  = "Target"
@@ -47,7 +51,10 @@ class BuilderBot(Bot):
         self.map_center_pos = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
         self.enemy_core_pos = get_symmetric(self.core_pos, self.sense.map_width, self.sense.map_height, self.sense.symmetries_possible[0])
 
-        self.switch_state(BotState.ECON_EXPLORE)
+        self.job = BotJob.RUSH if self.rc.get_position() == self.core_pos else BotJob.ECON
+        match self.job:
+            case BotJob.ECON: self.switch_state(BotState.ECON_EXPLORE)
+            case BotJob.RUSH: self.switch_state(BotState.ATTACK_GOTO)
         self.stuck_counter = 0
         self.stuck_pos = self.rc.get_position()
 
@@ -118,7 +125,7 @@ class BuilderBot(Bot):
                 self.recover_goto_core()
     
     def end_turn(self):
-        # self.sense.visualize()
+        self.sense.visualize()
         print(self.state)
         pass
         
@@ -144,7 +151,7 @@ class BuilderBot(Bot):
         closest_ore_dir = Direction.CENTRE
         closest_ore_is_ax = False
         closest_ore_dist = 10000000
-        for o in self.sense.env_index[sense._ENVIRONMENT_TO_VALUE[Environment.ORE_TITANIUM]]:
+        for o in self.sense.env_index[sense.ENVIRONMENT_TO_VALUE[Environment.ORE_TITANIUM]]:
             (should_connect, dir) = self.should_connect_to_ore(o, False)
             if should_connect:
                 dist = o.distance_squared(my_pos)
@@ -329,14 +336,77 @@ class BuilderBot(Bot):
     def defence_healer(self):
         pass
 
-    def attack_goto(self):
-        pass
 
+    def attack_goto(self):
+        # if not self.sense.is_seen(self.enemy_core_pos):
+        self.pathfind_target = self.enemy_core_pos
+        # else:
+        #     if self.pathfind_target == self.rc.get_position() or self.pathfind_target == self.enemy_core_pos:
+        #         self.pathfind_target = 
+        
+        pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+        if self.sense.is_seen(self.enemy_core_pos):
+            if self.sense.get_entity(self.pathfind_target) != EntityType.CORE:
+                self.sense.eliminate_next_symmetry()
+
+        if self.sense.enemy_core_found is not None:
+            harvesters = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.HARVESTER]]
+            for h in harvesters:
+                for d in CARDINAL_DIRECTIONS:
+                    c = h.add(d)
+                    if not is_in_map(c, self.sense.map_width, self.sense.map_height): continue
+                    if c in self.sense.transport_attack_blacklist: continue
+                    if not self.rc.is_in_vision(c): continue
+                    if not is_pos_turretable(self.rc, c): continue
+                    
+                    if c.distance_squared(self.enemy_core_pos) > GameConstants.GUNNER_VISION_RADIUS_SQ: continue
+                    if c in self.sense.ally_builders: continue
+
+                    self.switch_state(BotState.ATTACK_HIJACK)
+                    self.attack_target = c
+                    self.pathfind_target = c.add(get_best_empty_adj_with_diag(self.rc, c, self.rc.get_position()))
+                    return
+            
+            
+            transports = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.SPLITTER]] | \
+                         self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.CONVEYOR]] | \
+                         self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BRIDGE]]
+            for c in transports:
+                if c in self.sense.transport_attack_blacklist: continue
+                if not self.rc.is_in_vision(c): continue
+                bldg = self.rc.get_tile_building_id(c)
+                
+                if self.rc.get_stored_resource_id(bldg) is None: continue
+                if c.distance_squared(self.enemy_core_pos) > GameConstants.GUNNER_VISION_RADIUS_SQ: continue
+                if c in self.sense.ally_builders: continue
+
+                self.switch_state(BotState.ATTACK_HIJACK)
+                self.attack_target = c
+                self.pathfind_target = c.add(get_best_empty_adj_with_diag(self.rc, c, self.rc.get_position()))
+                return
+            
+            
     def attack_block_ore(self):
         pass
 
     def attack_hijack(self):
-        pass
+        if self.attack_target in self.sense.transport_attack_blacklist:
+            self.switch_state(BotState.ATTACK_GOTO)
+            self.pathfind_target = self.enemy_core_pos
+            return
+
+        if not self.rc.is_in_vision(self.attack_target):
+            pathfind.fast_pathfind_to(self.rc, self.sense, pathfind.pf_state.goal)
+            return
+
+        if self.sense.get_entity(self.attack_target) != EntityType.GUNNER:
+            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.attack_target): return
+            dir = self.attack_target.direction_to(self.enemy_core_pos)
+            if not self.rc.can_build_gunner(self.attack_target, dir): return
+            self.rc.build_gunner(self.attack_target, dir)
+
+        self.switch_state(BotState.ATTACK_GOTO)
+        self.pathfind_target = self.enemy_core_pos
 
     def recover_goto_core(self):
         if pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos):

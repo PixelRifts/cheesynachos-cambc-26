@@ -8,7 +8,7 @@ from typing import Optional
 from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
 
-RANDOM_SEED = 12345678
+RANDOM_SEED = 1234578
 
 ENTITY_TRANSPORT  = { EntityType.CONVEYOR, EntityType.BRIDGE, EntityType.SPLITTER, EntityType.ARMOURED_CONVEYOR }
 ENTITY_TURRET     = { EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH, EntityType.LAUNCHER }
@@ -53,6 +53,9 @@ def get_symmetric(pos: Position, width: int, height: int, sym: Symmetry) -> Posi
         case Symmetry.VERTICAL:   return Position(pos.x,             height - 1 - pos.y)
         case Symmetry.HORIZONTAL: return Position(width - 1 - pos.x, pos.y             )
     assert False
+
+def reflect(pos: Position, pivot: Position) -> Position:
+    return Position(2 * pivot.x - pos.x, 2 * pivot.y - pos.y)
 
 # Quick Pos Checks
 
@@ -183,6 +186,25 @@ def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
             best_score = score
             best_dir = d
     return best_dir
+
+def get_best_empty_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_score = -1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not is_pos_pathable(rc, p): continue
+        if is_friendly_transport(rc, p): continue
+        # bb = rc.get_tile_builder_bot_id(p)
+        # if bb is not None and rc.get_id(): continue
+
+        score = -p.distance_squared(b) + (-100 if rc.get_entity_type(rc.get_tile_building_id(p)) == EntityType.BARRIER else 0)
+        if score > best_score:
+            best_score = score
+            best_dir = d
+    return best_dir
+
 
 def is_adjacent(a: Position, b: Position, debug: bool = False) -> bool:
     dx = abs(a.x - b.x)

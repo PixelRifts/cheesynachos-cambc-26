@@ -563,7 +563,7 @@ class BuilderBot(Bot):
             pathfind.fast_pathfind_to(self.rc, pathfind.pf_state.final_target)
             return
 
-        if get_building_type(self.rc, self.attack_target) != EntityType.SENTINEL:
+        if get_building_type(self.rc, self.attack_target) != EntityType.GUNNER:
             if not try_destroy(self.rc, self.pathfind_target, self.attack_target): return
             dir = self.attack_target.direction_to(self.enemy_core_pos)
         

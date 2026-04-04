@@ -34,10 +34,15 @@ class Core(Bot):
             threshold = 4 + self.rc.get_current_round() // 50
 
         if self.count < threshold:
-            if self.bias_dir is not None:
-                spawn_pos = self.rc.get_position().add(self.bias_dir)
+            if self.rc.get_current_round() > 5:
+                # Rusher mode
+                spawn_pos = self.rc.get_position()
             else:
-                spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
+                if self.bias_dir is not None:
+                    spawn_pos = self.rc.get_position().add(self.bias_dir)
+                else:
+                    spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
+            
             if self.rc.can_spawn(spawn_pos):
                 self.rc.spawn_builder(spawn_pos)
                 self.count += 1
