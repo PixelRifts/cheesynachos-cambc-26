@@ -32,6 +32,7 @@ pf_state = PFState()
 # Fast Pathfind
 
 def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
+    if target is None: return False
     cur = rc.get_position()
     if cur == target: return True
 
@@ -74,7 +75,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
             entt = sense.get_entity(next_pos)
             allied = sense.is_allied(next_pos)
             if not is_entt_pathable(entt, allied) or env == Environment.WALL or \
-                (rc.get_tile_builder_bot_id(next_pos) is not None and rc.get_tile_builder_bot_id(next_pos) != rc.get_id()):
+                (rc.is_in_vision(next_pos) and rc.get_tile_builder_bot_id(next_pos) is not None and rc.get_tile_builder_bot_id(next_pos) != rc.get_id()):
                 pf_state.reset()
         else:
             pf_state.result_path.pop(0)
