@@ -9,7 +9,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 from heapq import heappush, heappop
 
 BARRIER_COST = 20
-DEBUG_DRAW = False
+DEBUG_DRAW = True
 
 class PFState:
     def __init__(self):
@@ -19,12 +19,15 @@ class PFState:
         # incremental A*
         self.astar_active = False
         self.goal = None
+        self.best_node = None
+        self.best_h = 10000000000000
 
         self.open_set = []
         self.came_from = {}
         self.g_score = {}
         self.failed = False
-
+        self.past_pos = None
+        
         self.result_path = []
 
 
@@ -32,13 +35,14 @@ pf_state = PFState()
 
 # Fast Pathfind
 
-def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
+def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_builder_at_tgt=False):
     if target is None: return False
     cur = rc.get_position()
     if cur == target: return True
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target:
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target\
+        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
@@ -48,7 +52,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_astar_internal(rc, sense, max_expansions=50)
+        step_astar_internal(rc, sense, max_expansions=50, ignore_builder_at_tgt=ignore_builder_at_tgt)
 
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []
@@ -69,6 +73,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
             rc.build_road(next_pos)
             if rc.can_move(d):
                 rc.move(d)
+                pf_state.past_pos = rc.get_position()
                 moved = True
         
         if not moved:
@@ -84,7 +89,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position):
         if rc.get_position() == target: return True
 
 
-def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
+def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignore_builder_at_tgt=False):
     expansions = 0
     open_set = pf_state.open_set
     came_from = pf_state.came_from
@@ -126,7 +131,9 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
                 entt = sense.get_entity(nxt)
                 allied = sense.is_allied(nxt)
                 if env == Environment.WALL: continue
-                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
+                
+                if not (ignore_builder_at_tgt and nxt is pf_state.goal):
+                    if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
 
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
@@ -135,13 +142,18 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
             
             tentative = g_score[current] + cost
             if nxt in g_score and tentative >= g_score[nxt]: continue
-            
+            h = manhattan_distance(nxt, goal)
+            if h < pf_state.best_h:
+                pf_state.best_h = h
+                pf_state.best_node = nxt
+
             came_from[nxt] = current
             g_score[nxt] = tentative
             heappush(
                 open_set,
                 (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
             )
+            
             if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
 
         expansions += 1
@@ -150,6 +162,10 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
         # no path exists
         pf_state.astar_active = False
         pf_state.failed = True
+        if pf_state.best_node in came_from:
+            path = reconstruct_path(came_from, pf_state.best_node)
+            pf_state.result_path = path
+            pf_state.result_path.pop(0)
 
 # Cardinal Pathfind
 

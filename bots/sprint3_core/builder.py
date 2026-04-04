@@ -60,7 +60,9 @@ class BuilderBot(Bot):
         match self.job:
             case BotJob.HEAL: self.switch_state(BotState.CORE_HEALER)
             case BotJob.ECON: self.switch_state(BotState.ECON_EXPLORE)
-            case BotJob.RUSH: self.switch_state(BotState.ATTACK_GOTO)
+            case BotJob.RUSH:
+                self.switch_state(BotState.ATTACK_GOTO)
+                self.sense.config(flow_tracking=True)
         self.stuck_counter = 0
         self.stuck_pos = self.rc.get_position()
 
@@ -107,7 +109,16 @@ class BuilderBot(Bot):
             get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), self.sense.symmetries_possible[0])
         
     def turn(self):
-        if self.sense.nearest_to_heal is not None and self.state != BotState.ECON_CONNECT:
+        if self.state != BotState.ECON_CONNECT:
+            # Stuck Detection
+            if self.rc.get_position() == self.stuck_pos:
+                self.stuck_counter += 1
+                if self.stuck_counter > BOT_TARGET_STUCK_TIMEOUT:
+                    self.switch_state(BotState.RECOVER_GOTO_CORE)
+            else:
+                self.stuck_counter = 0
+                self.stuck_pos = self.rc.get_position()
+        if self.sense.nearest_to_heal is not None and self.state not in { BotState.ECON_CONNECT, BotState.CORE_HEALER }:
             self.meta_nearest_heal()
 
         match self.state:
@@ -194,15 +205,6 @@ class BuilderBot(Bot):
             self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
 
     def econ_target(self):
-        # Stuck Detection
-        if self.rc.get_position() == self.stuck_pos:
-            self.stuck_counter += 1
-            if self.stuck_counter > BOT_TARGET_STUCK_TIMEOUT:
-                self.switch_state(BotState.RECOVER_GOTO_CORE)
-                return
-        else:
-            self.stuck_counter = 0
-            self.stuck_pos = self.rc.get_position()
 
         # Make sure there aren't new developments concerning the ore
         should_connect, _ = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax)
@@ -304,15 +306,16 @@ class BuilderBot(Bot):
                 print('launcher_target')
                 if not self.is_launcher_protected(self.econ_connect_protect_target):
                     dir = get_best_placable_adj_with_diag(self.rc, self.econ_connect_protect_target, self.enemy_core_pos)
-                    launcher_pos = self.econ_connect_protect_target.add(dir)
-                    self.rc.draw_indicator_dot(launcher_pos, 255, 0, 0)
-                    if not try_destroy(self.rc, self.sense, self.econ_connect_protect_target, launcher_pos):
-                        return
-                    if not self.rc.can_build_launcher(launcher_pos):
-                        (ti, ax) = self.rc.get_global_resources()
-                        print(ti, 'v', self.rc.get_launcher_cost()[0])
-                        return
-                    self.rc.build_launcher(launcher_pos)
+                    if dir != Direction.CENTRE:
+                        launcher_pos = self.econ_connect_protect_target.add(dir)
+                        self.rc.draw_indicator_dot(launcher_pos, 255, 0, 0)
+                        if not try_destroy(self.rc, self.sense, self.econ_connect_protect_target, launcher_pos):
+                            return
+                        if not self.rc.can_build_launcher(launcher_pos):
+                            (ti, ax) = self.rc.get_global_resources()
+                            print(ti, 'v', self.rc.get_launcher_cost()[0])
+                            return
+                        self.rc.build_launcher(launcher_pos)
 
             print('pre-bridge build')
             if self.econ_connect_saved_is_bridge:
@@ -359,6 +362,7 @@ class BuilderBot(Bot):
 
 
     def core_healer(self):
+        
         def not_my_problem(pos: Position) -> bool:
             if self.rc.is_in_vision(pos):
                 bb = self.rc.get_tile_builder_bot_id(pos)
@@ -377,31 +381,30 @@ class BuilderBot(Bot):
             return False # vulnerable building that needs healing
         
         if self.core_heal_target is None:
-            best_heal_target = None
-            best_heal_dist = 10000000
-            for bldg in self.rc.get_nearby_buildings():
-                p = self.rc.get_position(bldg)
+            # best_heal_target = None
+            # best_heal_dist = 10000000
+            # for bldg in self.rc.get_nearby_buildings():
+            #     p = self.rc.get_position(bldg)
                 
-                allied = self.rc.get_team(bldg) == self.rc.get_team()
-                hp = self.rc.get_hp(bldg)
-                max_hp = self.rc.get_max_hp(bldg)
-                effective_hp = hp + 4 if not_my_problem(p) else hp
+            #     allied = self.rc.get_team(bldg) == self.rc.get_team()
+            #     hp = self.rc.get_hp(bldg)
+            #     max_hp = self.rc.get_max_hp(bldg)
+            #     effective_hp = hp + 4 if not_my_problem(p) else hp
                 
-                if effective_hp < max_hp:
-                    self.rc.draw_indicator_dot(p, 255, 0, 0)
-                if allied and (effective_hp < max_hp):
-                    d = p.distance_squared(self.core_pos)
-                    if d < best_heal_dist:
-                        best_heal_dist = d
-                        best_heal_target = p
-            if best_heal_target is not None:
-                heal_dir = get_best_empty_adj_with_diag(self.rc, best_heal_target, self.rc.get_position())
-                self.pathfind_target = best_heal_target.add(heal_dir)
-                self.core_heal_target = best_heal_target
+            #     if effective_hp < max_hp:
+            #         self.rc.draw_indicator_dot(p, 255, 0, 0)
+            #     if allied and (effective_hp < max_hp):
+            #         d = p.distance_squared(self.core_pos)
+            #         if d < best_heal_dist:
+            #             best_heal_dist = d
+            #             best_heal_target = p
+            if self.sense.nearest_to_heal is not None:
+                heal_dir = get_best_empty_adj_with_diag(self.rc, self.sense.nearest_to_heal, self.rc.get_position())
+                self.pathfind_target = self.sense.nearest_to_heal.add(heal_dir)
+                self.core_heal_target = self.sense.nearest_to_heal
             else:
-                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
                 return
-        
         
         if self.core_heal_target is not None:
             self.rc.draw_indicator_dot(self.core_heal_target, 0, 255, 0)
@@ -414,7 +417,7 @@ class BuilderBot(Bot):
             bldg = self.rc.get_tile_building_id(self.core_heal_target)
             if bldg is None:
                 self.core_heal_target = None
-                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
                 return
             
             if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_target):
@@ -422,11 +425,9 @@ class BuilderBot(Bot):
                 print('moving to heal target' + str(self.pathfind_target))
                 # no return - allow immediate heal
 
-            print('hai')
             if self.rc.can_heal(self.core_heal_target):
                 self.rc.heal(self.core_heal_target)
                 # no return - allow checks
-                print('healed', self.core_heal_target)
                 
 
             if self.rc.is_in_vision(self.core_heal_target):
@@ -514,7 +515,8 @@ class BuilderBot(Bot):
         self.pathfind_target = self.enemy_core_pos
 
     def recover_goto_core(self):
-        if pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos):
+        pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
+        if self.rc.get_position().distance_squared(self.core_pos) <= 25:
             self.switch_state(BotState.ECON_EXPLORE)
 
 
@@ -563,7 +565,7 @@ class BuilderBot(Bot):
                 else:
                     already_siphoned_dir = d
                 
-            if is_pos_editable(self.rc, p):
+            if is_pos_editable(self.rc, p) and self.sense.get_entity(p) not in ENTITY_VALID_BLOCKAGE_ANY:
                 has_free_side = True
         print(
             "has_free_side:", has_free_side,

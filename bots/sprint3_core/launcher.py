@@ -39,7 +39,7 @@ class Launcher(Bot):
         #     self.core()
 
     def far(self, allied_structs: list[Position]):
-        bots = self.rc.get_nearby_units()
+        bots = self.rc.get_nearby_units(1)
         nearby_tiles = self.rc.get_nearby_tiles()
         best_bot = None
         best_tile = None
@@ -90,7 +90,7 @@ class Launcher(Bot):
     
 
     def core(self):
-        bots = self.rc.get_nearby_units()
+        bots = self.rc.get_nearby_units(2)
         for bot in bots:
             best_tile = None
             

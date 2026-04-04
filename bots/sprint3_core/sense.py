@@ -62,6 +62,11 @@ class Sense:
         elif self.map_height > self.map_width:
             self.symmetries_possible = [ Symmetry.VERTICAL, Symmetry.ROTATIONAL, Symmetry.HORIZONTAL ]
         
+        self.flow_tracking = False
+        
+    def config(self, flow_tracking: bool):
+        self.flow_tracking = flow_tracking
+
     def idx(self, p: Position) -> int:
         return p.x + self.map_width * p.y
 
@@ -111,8 +116,9 @@ class Sense:
 
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
-        for t in self.nearby_tiles:
-            self.remove_edges_from(t)
+        if self.flow_tracking:
+            for t in self.nearby_tiles:
+                self.remove_edges_from(t)
         
         for t in self.nearby_tiles:
             # Save Env and Buildings
@@ -132,11 +138,13 @@ class Sense:
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
                 self.enemy_core_found = self.rc.get_position(bldg)
-                
-            if entt in ENTITY_TRANSPORT:
-                outputs = self.get_outputs(self.rc, t, entt, bldg)
-                for out in outputs:
-                    if out is not None: self.add_edge(t, out)
+            
+            # Flow Tracking
+            if self.flow_tracking:
+                if entt in ENTITY_TRANSPORT:
+                    outputs = self.get_outputs(self.rc, t, entt, bldg)
+                    for out in outputs:
+                        if out is not None: self.add_edge(t, out)
 
             # Save Builder Bots
             bb = self.rc.get_tile_builder_bot_id(t)
@@ -157,12 +165,13 @@ class Sense:
                             to_elim.append(sym)
                 self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
 
-        for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
-            if self.is_allied(u):
-                self.transport_attack_blacklist.update(self.get_feeders_of(u))
-        for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.SENTINEL]]:
-            if self.is_allied(u):
-                self.transport_attack_blacklist.update(self.get_feeders_of(u))
+        if self.flow_tracking:
+            for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
+                if self.is_allied(u):
+                    self.transport_attack_blacklist.update(self.get_feeders_of(u))
+            for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.SENTINEL]]:
+                if self.is_allied(u):
+                    self.transport_attack_blacklist.update(self.get_feeders_of(u))
 
     
     # Feed Graph stuff
