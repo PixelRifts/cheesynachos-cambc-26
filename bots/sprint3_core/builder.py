@@ -384,7 +384,8 @@ class BuilderBot(Bot):
                         best_heal_dist = d
                         best_heal_target = p
             if best_heal_target is not None:
-                self.core_heal_target = best_heal_target
+                heal_dir = get_best_empty_adj_with_diag(self.rc, best_heal_target, self.rc.get_position())
+                self.core_heal_target = best_heal_target.add(heal_dir)
             else:
                 pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
                 return
@@ -403,6 +404,7 @@ class BuilderBot(Bot):
             
             if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_target):
                 pathfind.fast_pathfind_to(self.rc, self.sense, self.core_heal_target)
+                print('moving to heal target' + str(self.core_heal_target))
                 # no return - allow immediate heal
 
             if self.rc.can_heal(self.core_heal_target):
