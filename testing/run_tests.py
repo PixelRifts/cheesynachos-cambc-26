@@ -135,7 +135,10 @@ def main():
             for map_name in test_maps:
                 for match_num in range(matches_per):
                     test_seed = seed + match_num
-                    tasks.append((target_bot, opponent, map_name, test_seed))
+                    if match_num % 2 == 0:
+                        tasks.append((target_bot, opponent, map_name, test_seed))
+                    else:
+                        tasks.append((opponent, target_bot, map_name, test_seed))
         
         print(f"\n\nRunning {len(tasks)} matches...")
         print("Progress: ", end='', flush=True)
