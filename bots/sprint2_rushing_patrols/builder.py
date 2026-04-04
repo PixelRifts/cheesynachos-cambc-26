@@ -138,6 +138,9 @@ class BuilderBot(Bot):
             print('guessing enemy: ', self.enemy_core_pos)
     
     def turn(self):
+        # if self.sense.nearest_to_heal is not None:
+        #     self.meta_nearest_heal()
+
         match self.state:
             case BotState.ECON_EXPLORE:
                 self.econ_explore()
@@ -163,6 +166,15 @@ class BuilderBot(Bot):
             case BotState.ATTACK_HIJACK:
                 self.attack_hijack()
 
+    def meta_nearest_heal(self):
+        if self.rc.get_hp() < self.rc.get_max_hp():
+            if self.rc.can_heal(self.rc.get_position()):
+                self.rc.heal(self.rc.get_position())
+            return
+        if self.rc.get_position().distance_squared(self.sense.nearest_to_heal) > GameConstants.ACTION_RADIUS_SQ:
+            pathfind.fast_pathfind_to(self.rc, self.sense, self.sense.nearest_to_heal)
+        if self.rc.can_heal(self.sense.nearest_to_heal):
+            self.rc.heal(self.sense.nearest_to_heal)
 
     def econ_explore(self):
         # Defence Plan Guarantee

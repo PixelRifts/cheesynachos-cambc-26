@@ -13,9 +13,18 @@ class Core(Bot):
         self.rush_count = 0
         self.healer_count = 0
         self.ti_tracker = deque(maxlen=24)
+        self.active_rescue_ops = deque(maxlen=8)
         self.ore_dir = None
         map_center = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
         self.rush_dir = self.rc.get_position().direction_to(map_center)
+
+    def mark_rescue_operation(self, bldg_id: int):
+        if bldg_id in self.active_rescue_ops:
+            self.active_rescue_ops.remove(bldg_id)
+            self.active_rescue_ops.append(bldg_id)
+            return
+
+        self.active_rescue_ops.append(bldg_id)
 
     def start_turn(self):
         (ti, ax) = self.rc.get_global_resources()
@@ -39,6 +48,8 @@ class Core(Bot):
         turn = self.rc.get_current_round()
 
         if self.healer_needed() or (self.sees_enemy_builder_bot() and self.healer_count < 1):
+            if self.healer_needed(): print("Healer needed!")
+            else: print("Enemy builder bot spotted!")
             self.spawn_healer()
             
         target = 2 + turn // 80
@@ -74,12 +85,14 @@ class Core(Bot):
         for bldg in self.rc.get_nearby_buildings():
             if self.rc.get_team(bldg) != self.rc.get_team():
                 continue
+            if (self.rc.get_entity_type(bldg) == EntityType.ROAD):
+                continue
 
             # bldg_pos = self.rc.get_position(bldg)
             hp = self.rc.get_hp(bldg)
             max_hp = self.rc.get_max_hp(bldg)
 
-            # Effective HP logic is temporarily disabled.
+            # Effective HP logic - Didnt Work.
             # effective_hp = hp
             # if self.rc.is_in_vision(bldg_pos):
             #     bb_here = self.rc.get_tile_builder_bot_id(bldg_pos)
@@ -95,7 +108,9 @@ class Core(Bot):
             #     if self.rc.get_team(bb) == self.rc.get_team():
             #         effective_hp += 4
 
-            if hp * 2 < max_hp:
+            hp_threshold = 9 if bldg in self.active_rescue_ops else 13  # DONOT CHANGE !!!
+            if hp < hp_threshold:
+                self.mark_rescue_operation(bldg)
                 return True
 
         return False
