@@ -408,7 +408,7 @@ class BuilderBot(Bot):
                 self.pathfind_target = self.sense.nearest_to_heal.add(heal_dir)
                 self.core_heal_target = self.sense.nearest_to_heal
             else:
-                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
+                pathfind.silly_pathfind_to(self.rc, self.core_pos)
                 return
         
         if self.core_heal_target is not None:
@@ -416,17 +416,17 @@ class BuilderBot(Bot):
 
             print('[HEAL]heal target: ', self.core_heal_target)
             if not self.rc.is_in_vision(self.core_heal_target):
-                pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
+                pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
                 return
             
             bldg = self.rc.get_tile_building_id(self.core_heal_target)
             if bldg is None:
                 self.core_heal_target = None
-                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
+                pathfind.silly_pathfind_to(self.rc, self.core_pos)
                 return
             
             if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_target):
-                pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+                pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
                 print('moving to heal target' + str(self.pathfind_target))
                 # no return - allow immediate heal
 
@@ -449,13 +449,14 @@ class BuilderBot(Bot):
             
 
     def attack_goto(self):
-        # if not self.sense.is_seen(self.enemy_core_pos):
         self.pathfind_target = self.enemy_core_pos
-        # else:
-        #     if self.pathfind_target == self.rc.get_position() or self.pathfind_target == self.enemy_core_pos:
-        #         self.pathfind_target = 
+        should_astar = not self.sense.is_seen(self.enemy_core_pos)
         
-        pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+        if should_astar:
+            pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+        else:
+            pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+
         if self.sense.is_seen(self.enemy_core_pos):
             if self.sense.get_entity(self.pathfind_target) != EntityType.CORE:
                 self.sense.eliminate_next_symmetry()
@@ -495,7 +496,6 @@ class BuilderBot(Bot):
                 self.attack_target = c
                 self.pathfind_target = c.add(get_best_empty_adj_with_diag(self.rc, c, self.rc.get_position()))
                 return
-            
             
     def attack_block_ore(self):
         pass
