@@ -27,63 +27,65 @@ class Launcher(Bot):
         pass
 
     def turn(self):
-        allied_structs = []
+        allied_positions = []
         for bldg in self.rc.get_nearby_buildings():
             if self.rc.get_team(bldg) == self.rc.get_team():
-                allied_structs.append(bldg)
+                allied_positions.append(self.rc.get_position())
 
         if self.type == Defence.OTHER:
-            self.far(allied_structs)
+            self.far(allied_positions)
         # else:
         #     self.core()
 
-    def far(self, allied_structs: list[Position]):
-        bots = self.rc.get_nearby_units(2)
+    def far(self, allied_positions: list[Position]):
+        my_pos = self.rc.get_position()
         nearby_tiles = self.rc.get_nearby_tiles()
-        best_bot = None
-        best_tile = None
-        best_score = float('-inf')
+        bots = self.rc.get_nearby_units(2)
 
+        if allied_positions:
+            tile_ally_min = {
+                pos: min(pos.distance_squared(ap) for ap in allied_positions)
+                for pos in nearby_tiles
+            }
+        else:
+            tile_ally_min = { pos: 0 for pos in nearby_tiles }
+        
+        tile_base_score = {
+            pos: my_pos.distance_squared(pos) + tile_ally_min[pos]
+            for pos in nearby_tiles
+        }
+
+        enemy_data = []
         for bot in bots:
-            print('current time: ', self.rc.get_cpu_time_elapsed())
-            if self.rc.get_team(bot) == self.rc.get_team():
-                continue
-            if self.rc.get_entity_type(bot) != EntityType.BUILDER_BOT:
-                continue
+            if self.rc.get_team(bot) == self.rc.get_team(): continue
+            if self.rc.get_entity_type(bot) != EntityType.BUILDER_BOT: continue
 
             enemy_pos = self.rc.get_position(bot)
 
-            # how dangerous this enemy is
-            min_dist_enemy_to_ally = float('inf')
-            for ally in allied_structs:
-                ally_pos = self.rc.get_position(ally)
-                d = enemy_pos.distance_squared(ally_pos)
-                if d < min_dist_enemy_to_ally:
-                    min_dist_enemy_to_ally = d
+            if allied_positions:
+                min_dist_to_ally = min(enemy_pos.distance_squared(ap) for ap in allied_positions)
+            else:
+                min_dist_to_ally = 0
 
-            # invert so closer = higher score
-            enemy_score = -min_dist_enemy_to_ally
+            enemy_data.append((bot, enemy_pos, -min_dist_to_ally * 2))
 
+        if not enemy_data: return
+
+        best_bot = None
+        best_tile = None
+        best_score = float('-inf')
+        
+        for bot, enemy_pos, enemy_score in enemy_data:
             for pos in nearby_tiles:
                 if not self.rc.can_launch(enemy_pos, pos):
                     continue
-                dist_self = self.rc.get_position().distance_squared(pos)
-
-                min_dist_ally = float('inf')
-                for ally in allied_structs:
-                    ally_pos = self.rc.get_position(ally)
-                    d = pos.distance_squared(ally_pos)
-                    if d < min_dist_ally:
-                        min_dist_ally = d
-
-                tile_score = dist_self + min_dist_ally
-
-                score = tile_score + enemy_score * 2
-
+                score = tile_base_score[pos] + enemy_score
                 if score > best_score:
                     best_score = score
                     best_bot = bot
                     best_tile = pos
+
+
 
         if best_bot is not None and best_tile is not None:
             self.rc.launch(self.rc.get_position(best_bot), best_tile)

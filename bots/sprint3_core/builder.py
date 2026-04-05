@@ -210,7 +210,6 @@ class BuilderBot(Bot):
             self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
 
     def econ_target(self):
-
         # Make sure there aren't new developments concerning the ore
         should_connect, _ = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax)
         if not should_connect:
@@ -234,7 +233,7 @@ class BuilderBot(Bot):
                 valid_count += 1
                 continue
             if not self.rc.is_in_vision(adj): continue
-            print('wall ', d, adj)
+            # print('wall ', d, adj)
 
             entt = self.sense.get_entity(adj)
             allied = self.sense.is_allied(adj)
@@ -253,7 +252,7 @@ class BuilderBot(Bot):
                         valid_count += 1
                 return
         
-        print('after wall checks valid=', valid_count)
+        # print('after wall checks valid=', valid_count)
         if valid_count != 3: return
         # Validate Position
         if self.rc.get_position() == self.econ_target_ore:
@@ -263,22 +262,21 @@ class BuilderBot(Bot):
             return pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
         
         
-        print('harvester validation')
+        # print('harvester validation')
         # Validate Harvester
         if self.sense.get_entity(self.econ_target_ore) != EntityType.HARVESTER and is_adjacent(self.rc.get_position(), self.econ_target_ore):
-            print('trydestroy?')
+            # print('trydestroy?')
             if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore):
                 return
-            print('trybuildharvester')
+            # print('trybuildharvester')
             if self.rc.can_build_harvester(self.econ_target_ore):
                 self.rc.build_harvester(self.econ_target_ore)
             else:
-                print('couldnt build at ', self.econ_target_ore)
-                (ti, ax) = self.rc.get_global_resources()
-                print
+                # print('couldnt build at ', self.econ_target_ore)
+                # (ti, ax) = self.rc.get_global_resources()
                 return
         
-        print('post harvester validation')
+        # print('post harvester validation')
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
             if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
                 self.switch_state(BotState.ECON_CONNECT)
