@@ -10,9 +10,11 @@ from heapq import heappush, heappop
 
 BARRIER_COST = 20
 DEBUG_DRAW = True
+H_WEIGHT = 1.5
 
 class PFState:
     def __init__(self):
+        self.closed_set = set()
         self.reset()
 
     def reset(self):
@@ -23,15 +25,18 @@ class PFState:
         self.best_h = 10000000000000
 
         self.open_set = []
+        self.closed_set.clear()
         self.came_from = {}
         self.g_score = {}
         self.failed = False
         self.past_pos = None
         
         self.result_path = []
-
+        self.computed_this_turn = False
 
 pf_state = PFState()
+def clear():
+    pf_state.computed_this_turn = False
 
 # Fast Pathfind
 
@@ -49,10 +54,12 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
         pf_state.g_score[cur] = 0
         heappush(pf_state.open_set, (0, cur))
+        if pf_state.computed_this_turn: return False
 
     # continue A* for a limited budget
     if pf_state.astar_active:
         step_astar_internal(rc, sense, max_expansions=50, ignore_builder_at_tgt=ignore_builder_at_tgt)
+        pf_state.computed_this_turn = True
 
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []
@@ -92,6 +99,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignore_builder_at_tgt=False):
     expansions = 0
     open_set = pf_state.open_set
+    closed_set = pf_state.closed_set
     came_from = pf_state.came_from
     g_score = pf_state.g_score
     goal = pf_state.goal
@@ -101,8 +109,9 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
     
     while open_set and expansions < max_expansions:
         _, current = heappop(open_set)
-        if current not in pf_state.g_score:
+        if current in pf_state.closed_set:
             continue
+        pf_state.closed_set.add(current)
 
         if current == goal:
             if DEBUG_DRAW: rc.draw_indicator_dot(current, 0, 255, 0)
@@ -142,7 +151,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
             
             tentative = g_score[current] + cost
             if nxt in g_score and tentative >= g_score[nxt]: continue
-            h = manhattan_distance(nxt, goal)
+            h = chebyshev_distance(nxt, goal)
             if h < pf_state.best_h:
                 pf_state.best_h = h
                 pf_state.best_node = nxt
@@ -151,7 +160,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
             g_score[nxt] = tentative
             heappush(
                 open_set,
-                (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
+                (tentative + H_WEIGHT * chebyshev_distance(nxt, goal), nxt)
             )
             
             if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
@@ -169,7 +178,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
 
 # Cardinal Pathfind
 
-def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_home: bool):
+def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_home: bool) -> bool:
     cur = rc.get_position()
     if cur == target: return True
 
@@ -181,10 +190,12 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
 
         pf_state.g_score[cur] = 0
         heappush(pf_state.open_set, (0, cur))
+        if pf_state.computed_this_turn: return False
 
     # continue A* for a limited budget
     if pf_state.astar_active:
         step_cardinal_astar_internal(rc, sense, max_expansions=50)
+        pf_state.computed_this_turn = True
     
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []
@@ -273,8 +284,9 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
     
     while open_set and expansions < max_expansions:
         _, current = heappop(open_set)
-        if current not in pf_state.g_score:
+        if current in pf_state.closed_set:
             continue
+        pf_state.closed_set.add(current)
 
         if current == goal:
             if DEBUG_DRAW: rc.draw_indicator_dot(current, 0, 255, 0)
@@ -318,7 +330,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
             g_score[nxt] = tentative
             heappush(
                 open_set,
-                (tentative +  1.2 * manhattan_distance(nxt, goal), nxt)
+                (tentative + H_WEIGHT * manhattan_distance(nxt, goal), nxt)
             )
             if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
 

@@ -32,20 +32,20 @@ class Launcher(Bot):
             if self.rc.get_team(bldg) == self.rc.get_team():
                 allied_structs.append(bldg)
 
-        
         if self.type == Defence.OTHER:
             self.far(allied_structs)
         # else:
         #     self.core()
 
     def far(self, allied_structs: list[Position]):
-        bots = self.rc.get_nearby_units(1)
+        bots = self.rc.get_nearby_units(2)
         nearby_tiles = self.rc.get_nearby_tiles()
         best_bot = None
         best_tile = None
         best_score = float('-inf')
 
         for bot in bots:
+            print('current time: ', self.rc.get_cpu_time_elapsed())
             if self.rc.get_team(bot) == self.rc.get_team():
                 continue
             if self.rc.get_entity_type(bot) != EntityType.BUILDER_BOT:

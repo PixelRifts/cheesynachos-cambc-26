@@ -219,9 +219,10 @@ def is_adjacent_with_diag(a: Position, b: Position, debug: bool = False) -> bool
     return dx <= 1 and dy <= 1
 
 def manhattan_distance(a: Position, b: Position) -> int:
-    dx = abs(a.x - b.x)
-    dy = abs(a.y - b.y)
-    return dx + dy
+    return abs(a.x - b.x) + abs(a.y - b.y)
+
+def chebyshev_distance(a, b):
+    return max(abs(a.x - b.x), abs(a.y - b.y))
 
 # Direction Helpers
 

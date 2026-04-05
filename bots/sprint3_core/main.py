@@ -17,8 +17,8 @@ class Player:
         pass
 
     def run(self, rc: Controller):
+        gc.disable()
         if self.brain is None:
-            gc.disable()
             start = rc.get_cpu_time_elapsed()
             entt = rc.get_entity_type()
             random.seed(RANDOM_SEED + rc.get_id())

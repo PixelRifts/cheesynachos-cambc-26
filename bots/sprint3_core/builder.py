@@ -36,6 +36,8 @@ class BotState(Enum):
 
     RECOVER_GOTO_CORE = "Core"
 
+NO_STUCK_DETECTION_STATES = { BotState.ECON_CONNECT, BotState.CORE_HEALER }
+
 class BuilderBot(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
@@ -101,20 +103,24 @@ class BuilderBot(Bot):
         self.state = state
         self.state_turn_counter = 0
         self.reset_state_variables()
+        print('Switch:', self.state)
 
     def start_turn(self):
+        pathfind.clear()
+        print(self.state)
         self.sense.update()
 
         self.enemy_core_pos = self.sense.enemy_core_found if self.sense.enemy_core_found is not None else \
             get_symmetric(self.core_pos, self.rc.get_map_width(), self.rc.get_map_height(), self.sense.symmetries_possible[0])
         
     def turn(self):
-        if self.state != BotState.ECON_CONNECT:
+        if self.state not in NO_STUCK_DETECTION_STATES:
             # Stuck Detection
             if self.rc.get_position() == self.stuck_pos:
                 self.stuck_counter += 1
                 if self.stuck_counter > BOT_TARGET_STUCK_TIMEOUT:
                     self.switch_state(BotState.RECOVER_GOTO_CORE)
+                    self.stuck_counter = 0
             else:
                 self.stuck_counter = 0
                 self.stuck_pos = self.rc.get_position()
@@ -149,7 +155,6 @@ class BuilderBot(Bot):
     
     def end_turn(self):
         # self.sense.visualize()
-        print(self.state)
         pass
         
     ### ========================
@@ -229,7 +234,7 @@ class BuilderBot(Bot):
                 valid_count += 1
                 continue
             if not self.rc.is_in_vision(adj): continue
-            print('wall ', d)
+            print('wall ', d, adj)
 
             entt = self.sense.get_entity(adj)
             allied = self.sense.is_allied(adj)
@@ -248,8 +253,8 @@ class BuilderBot(Bot):
                         valid_count += 1
                 return
         
+        print('after wall checks valid=', valid_count)
         if valid_count != 3: return
-        print('after wall checks')
         # Validate Position
         if self.rc.get_position() == self.econ_target_ore:
             move_dir = self.econ_target_ore.direction_to(self.pathfind_target)
@@ -567,15 +572,7 @@ class BuilderBot(Bot):
                 
             if is_pos_editable(self.rc, p) and self.sense.get_entity(p) not in ENTITY_VALID_BLOCKAGE_ANY:
                 has_free_side = True
-        print(
-            "has_free_side:", has_free_side,
-            "| already_siphoned:", already_siphoned,
-            "| already_siphoned_dir:", already_siphoned_dir,
-            "| bot_marked:", bot_marked,
-            "| not_enough_info:", not_enough_info,
-            "| harvester_placable:", harvester_placable,
-            "| has_harvester:", has_harvester
-        )
+
         if bot_marked: return (False, Direction.CENTRE)
         if has_harvester and already_siphoned: return (False, already_siphoned_dir)
         tgt = get_best_empty_adj(self.rc, pos, self.core_pos)
