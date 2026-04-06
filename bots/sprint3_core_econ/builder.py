@@ -210,6 +210,7 @@ class BuilderBot(Bot):
             self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
 
     def econ_target(self):
+
         # Make sure there aren't new developments concerning the ore
         should_connect, _ = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax)
         if not should_connect:
@@ -233,7 +234,7 @@ class BuilderBot(Bot):
                 valid_count += 1
                 continue
             if not self.rc.is_in_vision(adj): continue
-            # print('wall ', d, adj)
+            print('wall ', d, adj)
 
             entt = self.sense.get_entity(adj)
             allied = self.sense.is_allied(adj)
@@ -252,7 +253,7 @@ class BuilderBot(Bot):
                         valid_count += 1
                 return
         
-        # print('after wall checks valid=', valid_count)
+        print('after wall checks valid=', valid_count)
         if valid_count != 3: return
         # Validate Position
         if self.rc.get_position() == self.econ_target_ore:
@@ -262,21 +263,22 @@ class BuilderBot(Bot):
             return pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
         
         
-        # print('harvester validation')
+        print('harvester validation')
         # Validate Harvester
         if self.sense.get_entity(self.econ_target_ore) != EntityType.HARVESTER and is_adjacent(self.rc.get_position(), self.econ_target_ore):
-            # print('trydestroy?')
+            print('trydestroy?')
             if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore):
                 return
-            # print('trybuildharvester')
+            print('trybuildharvester')
             if self.rc.can_build_harvester(self.econ_target_ore):
                 self.rc.build_harvester(self.econ_target_ore)
             else:
-                # print('couldnt build at ', self.econ_target_ore)
-                # (ti, ax) = self.rc.get_global_resources()
+                print('couldnt build at ', self.econ_target_ore)
+                (ti, ax) = self.rc.get_global_resources()
+                print
                 return
         
-        # print('post harvester validation')
+        print('post harvester validation')
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
             if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
                 self.switch_state(BotState.ECON_CONNECT)
@@ -389,24 +391,24 @@ class BuilderBot(Bot):
                 self.pathfind_target = self.sense.nearest_to_heal.add(heal_dir)
                 self.core_heal_target = self.sense.nearest_to_heal
             else:
-                pathfind.silly_pathfind_to(self.rc, self.core_pos)
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
                 return
         
         if self.core_heal_target is not None:
             self.rc.draw_indicator_dot(self.core_heal_target, 0, 255, 0)
 
             if not self.rc.is_in_vision(self.core_heal_target):
-                pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+                pathfind.fast_pathfind_to(self.rc, self.pathfind_target)
                 return
             
             bldg = self.rc.get_tile_building_id(self.core_heal_target)
             if bldg is None:
                 self.core_heal_target = None
-                pathfind.silly_pathfind_to(self.rc, self.core_pos)
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
                 return
             
             if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_target):
-                pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
                 print('moving to heal target' + str(self.pathfind_target))
                 # no return - allow immediate heal
 
@@ -429,14 +431,13 @@ class BuilderBot(Bot):
             
 
     def attack_goto(self):
+        # if not self.sense.is_seen(self.enemy_core_pos):
         self.pathfind_target = self.enemy_core_pos
-        should_astar = not self.sense.is_seen(self.enemy_core_pos)
+        # else:
+        #     if self.pathfind_target == self.rc.get_position() or self.pathfind_target == self.enemy_core_pos:
+        #         self.pathfind_target = 
         
-        if should_astar:
-            pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
-        else:
-            pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
-
+        pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
         if self.sense.is_seen(self.enemy_core_pos):
             if self.sense.get_entity(self.pathfind_target) != EntityType.CORE:
                 self.sense.eliminate_next_symmetry()
@@ -476,6 +477,7 @@ class BuilderBot(Bot):
                 self.attack_target = c
                 self.pathfind_target = c.add(get_best_empty_adj_with_diag(self.rc, c, self.rc.get_position()))
                 return
+            
             
     def attack_block_ore(self):
         pass
