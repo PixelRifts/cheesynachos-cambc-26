@@ -34,6 +34,27 @@ ENTITY_TYPE_TO_VALUE = {
 }
 _VALUE_TO_ENTITY_TYPE = {v: k for k, v in ENTITY_TYPE_TO_VALUE.items()}
 
+DIRECTION_TO_VALUE = {
+    None: 0,
+    Direction.CENTRE: 0,
+    Direction.NORTH: 1,
+    Direction.NORTHEAST: 2,
+    Direction.EAST: 3,
+    Direction.SOUTHEAST: 4,
+    Direction.SOUTH: 5,
+    Direction.SOUTHWEST: 6,
+    Direction.WEST: 7,
+    Direction.NORTHWEST: 8,
+}
+_VALUE_TO_DIRECTION = {v: k for k, v in DIRECTION_TO_VALUE.items()}
+
+TURRET_ATTACK_COSTS = {
+    EntityType.GUNNER:   10,
+    EntityType.SENTINEL: 5,
+    EntityType.BREACH:   20,
+    EntityType.LAUNCHER: 5
+}
+
 class Sense:
     def __init__(self, rc: Controller):
         self.rc = rc
@@ -52,9 +73,10 @@ class Sense:
         self.feed_graph: Dict[Position, Set[Position]] = {}
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
-
+        
         self.nearest_to_heal: Position = None
         self.nearest_to_heal_dist = 100000000
+        self.turret_cost_map = array('i', [0] * self.size)
     
         self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
         if self.map_width > self.map_height:
@@ -74,34 +96,40 @@ class Sense:
         i = self.idx(p)
         env_id = ENVIRONMENT_TO_VALUE[env]
         self.env_index[env_id].add(p)
-        self.map[i] = (env_id << 8) | (self.map[i] & 0xFF)
-
-    def set_entt(self, p: Position, entity: EntityType, allied: bool):
+        self.map[i] = (env_id << 13) | (self.map[i] & 0x1FFF)
+        
+    def set_entt(self, p: Position, dir: Direction, entity: EntityType, allied: bool):
         i = self.idx(p)
+        
         entt_type_id = ENTITY_TYPE_TO_VALUE[entity]
+        dir_id = DIRECTION_TO_VALUE[dir]
         self.entt_index[entt_type_id].add(p)
-        self.map[i] = (self.map[i] & 0xFF00) | (entt_type_id << 1) | allied
 
-    def set_entt_and_env(self, p: Position, entity: EntityType, env: Environment, allied: bool):
+        self.map[i] = (self.map[i] & 0xE000) | (entt_type_id << 5) | (dir_id << 1) | allied
+
+    def set_entt_and_env(self, p: Position, dir: Direction, entity: EntityType, env: Environment, allied: bool):
         i = self.idx(p)
 
         entt_type_id = ENTITY_TYPE_TO_VALUE[entity]
         env_id = ENVIRONMENT_TO_VALUE[env]
+        dir_id = DIRECTION_TO_VALUE[dir]
         self.entt_index[entt_type_id].add(p)
         self.env_index[env_id].add(p)
 
-        self.map[i] = (env_id << 8) | (entt_type_id << 1) | allied
+        self.map[i] = (env_id << 13) | (entt_type_id << 5) | (dir_id << 1) | allied
 
     def get_env(self, p: Position):
-        return _VALUE_TO_ENVIRONMENT[(self.map[self.idx(p)] >> 8) & 0xFF]
+        return _VALUE_TO_ENVIRONMENT[self.map[self.idx(p)] >> 13]
 
     def get_entity(self, pos: Position):
-        return _VALUE_TO_ENTITY_TYPE.get((self.map[self.idx(pos)] >> 1) & 0x7F)
+        return _VALUE_TO_ENTITY_TYPE.get((self.map[self.idx(pos)] >> 5) & 0xFF)
     
+    def get_direction(self, pos: Position):
+        return _VALUE_TO_DIRECTION.get((self.map[self.idx(pos)] >> 1) & 0xF)
+
     def is_allied(self, pos: Position):
         return self.map[self.idx(pos)] & 1
     
-
     def is_seen(self, pos: Position):
         return self.map[self.idx(pos)] != 0
 
@@ -126,7 +154,23 @@ class Sense:
             bldg = self.rc.get_tile_building_id(t)
             entt = None if bldg is None else self.rc.get_entity_type(bldg)
             allied = False if bldg is None else self.rc.get_team(bldg) == self.rc.get_team()
-            self.set_entt_and_env(t, entt, env, allied)
+            dir = self.rc.get_direction(bldg) if entt in ENTITY_DIRECTIONAL else Direction.CENTRE
+
+            # Compare with old if turret and update costs
+            old_entt = self.get_entity(t)
+            old_dir = self.get_direction(t)
+            old_allied = self.is_allied(t)
+            if (old_entt in ENTITY_TURRET or entt in ENTITY_TURRET) and\
+                (old_entt != entt or old_dir != dir) and\
+                (not old_allied or not allied):
+                if old_entt in ENTITY_TURRET and not old_allied:
+                    self.add_turret_attack_costs(t, old_entt, old_dir, -1)
+                if entt in ENTITY_TURRET and not allied:
+                    self.add_turret_attack_costs(t, entt, dir, 1)
+                    # print(self.turret_cost_map, file=sys.stderr)
+
+            # Commit information about tile
+            self.set_entt_and_env(t, dir, entt, env, allied)
 
             # Nearest Heal target
             if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
@@ -164,7 +208,7 @@ class Sense:
                         if env_here != env:
                             to_elim.append(sym)
                 self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
-
+        
         if self.flow_tracking:
             for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
                 if self.is_allied(u):
@@ -173,7 +217,6 @@ class Sense:
                 if self.is_allied(u):
                     self.transport_attack_blacklist.update(self.get_feeders_of(u))
 
-    
     # Feed Graph stuff
 
     def add_edge(self, src: Position, dst: Position):
@@ -219,6 +262,15 @@ class Sense:
                     stack.append(src)
 
         return result
+
+    # Turret Avoidance
+    def add_turret_attack_costs(self, p: Position, e: EntityType, dir: Direction, mult: int):
+        tiles = self.rc.get_attackable_tiles_from(p, dir, e) if e != EntityType.LAUNCHER else [p.add(d) for d in DIRECTIONS]
+        
+        cost = TURRET_ATTACK_COSTS.get(e, 0) * mult
+        for t in tiles:
+            self.turret_cost_map[self.idx(t)] += cost
+            self.rc.draw_indicator_dot(t, 0, 0, 255)
 
     # Misc
 

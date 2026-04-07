@@ -37,6 +37,7 @@ class SimpleShooter(Bot):
         self.best_target = None
 
         attackables = self.rc.get_attackable_tiles()
+        print(len(attackables))
         priority = -100000
         for p in attackables:
             e = self.rc.get_tile_building_id(p)

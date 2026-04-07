@@ -30,6 +30,8 @@ class Player:
                 self.brain = Launcher(rc)
             elif entt == EntityType.GUNNER:
                 self.brain = SimpleShooter(rc)
+            elif entt == EntityType.SENTINEL:
+                self.brain = SimpleShooter(rc)
             print('total init time =', rc.get_cpu_time_elapsed()-start)
         
         

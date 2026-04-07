@@ -24,13 +24,13 @@ ENTITY_COSTS = {
     EntityType.SENTINEL: (100, 100000),
     EntityType.BREACH: (100, 100000),
     EntityType.LAUNCHER: (100, 100000),
-    EntityType.CONVEYOR: (-2, -1),
-    EntityType.SPLITTER: (-2, -1),
-    EntityType.ARMOURED_CONVEYOR: (-2, -1),
-    EntityType.BRIDGE: (-2, -1),
+    EntityType.CONVEYOR: (-2, -2),
+    EntityType.SPLITTER: (-2, -2),
+    EntityType.ARMOURED_CONVEYOR: (-2, -2),
+    EntityType.BRIDGE: (-2, -2),
     EntityType.HARVESTER: (400, 100000),
     EntityType.FOUNDRY: (400, 100000),
-    EntityType.ROAD: (-2, -1),
+    EntityType.ROAD: (-2, -2),
     EntityType.BARRIER: (20, 100000),
     EntityType.MARKER: (0, -1),
 }
@@ -88,7 +88,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
     if pf_state.computed_this_turn: return False
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target\
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
         or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
         pf_state.reset()
         pf_state.astar_active = True
@@ -171,7 +171,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
             pf_state.astar_active = False
             return
 
-        for d in DIRECTIONS:
+        for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
             nxt = current.add(d)
             cost = 1
 
@@ -187,6 +187,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
 
                 cost += ENV_COSTS[env]
                 cost += ENTITY_COSTS[entt][1-int(allied)]
+                cost += sense.turret_cost_map[sense.idx(nxt)]
                 if cost >= 100000: continue
             
             tentative = g_score[current] + cost
@@ -223,7 +224,8 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     if cur == target: return True
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target:
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
+        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
@@ -234,7 +236,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_cardinal_astar_internal(rc, sense, max_expansions=50)
+        step_cardinal_astar_internal(rc, sense, max_expansions=200)
         pf_state.computed_this_turn = True
     
     if not pf_state.astar_active and pf_state.failed:
@@ -291,6 +293,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
             rc.build_conveyor(next_pos, conveyor_dir)
         if rc.can_move(d):
             rc.move(d)
+            pf_state.past_pos = rc.get_position()
             moved = True
         
         # Possibly recompute if blocked
