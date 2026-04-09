@@ -8,34 +8,8 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 # Implement BUG + BFS Pathfinding
 from heapq import heappush, heappop
 
-ENV_COSTS = {
-    None: 0,
-    Environment.EMPTY: 2,
-    Environment.ORE_AXIONITE: 3,
-    Environment.ORE_TITANIUM: 3,
-    Environment.WALL: 100000,
-}
-
-# (Allied, Not Allied)
-ENTITY_COSTS = {
-    None: (0, 0),
-    EntityType.CORE: (-2, 100000),
-    EntityType.GUNNER: (100, 100000),
-    EntityType.SENTINEL: (100, 100000),
-    EntityType.BREACH: (100, 100000),
-    EntityType.LAUNCHER: (100, 100000),
-    EntityType.CONVEYOR: (-2, -2),
-    EntityType.SPLITTER: (-2, -2),
-    EntityType.ARMOURED_CONVEYOR: (-2, -2),
-    EntityType.BRIDGE: (-2, -2),
-    EntityType.HARVESTER: (400, 100000),
-    EntityType.FOUNDRY: (400, 100000),
-    EntityType.ROAD: (-2, -2),
-    EntityType.BARRIER: (20, 100000),
-    EntityType.MARKER: (0, -1),
-}
-
-DEBUG_DRAW = False
+BARRIER_COST = 20
+DEBUG_DRAW = True
 H_WEIGHT = 1.5
 
 class PFState:
@@ -88,7 +62,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
     if pf_state.computed_this_turn: return False
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target\
         or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
         pf_state.reset()
         pf_state.astar_active = True
@@ -171,7 +145,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
             pf_state.astar_active = False
             return
 
-        for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
+        for d in DIRECTIONS:
             nxt = current.add(d)
             cost = 1
 
@@ -185,10 +159,10 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
                 if not (ignore_builder_at_tgt and nxt is pf_state.goal):
                     if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
 
-                cost += ENV_COSTS[env]
-                cost += ENTITY_COSTS[entt][1-int(allied)]
-                cost += sense.turret_cost_map[sense.idx(nxt)]
-                if cost >= 100000: continue
+                if not is_entt_pathable(entt, allied):
+                    if allied and entt == EntityType.BARRIER:
+                        cost = BARRIER_COST
+                    else: continue
             
             tentative = g_score[current] + cost
             if nxt in g_score and tentative >= g_score[nxt]: continue
@@ -224,8 +198,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     if cur == target: return True
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
-        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target:
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
@@ -236,7 +209,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_cardinal_astar_internal(rc, sense, max_expansions=200)
+        step_cardinal_astar_internal(rc, sense, max_expansions=50)
         pf_state.computed_this_turn = True
     
     if not pf_state.astar_active and pf_state.failed:
@@ -259,15 +232,21 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         print(needs_fix)
 
         if needs_fix:
+            print('hi')
             if entt is not None:
+                print('hi2')
                 allied = sense.is_allied(cur)
                 if allied:
+                    print('hi ally')
                     if rc.can_destroy(cur): rc.destroy(cur)
                 else:
+                    print('hi bad')
                     if rc.can_fire(cur):
+                        print('fired')
                         rc.fire(cur)
                 
             if rc.can_build_conveyor(cur, d):
+                print('built conveyor')
                 rc.build_conveyor(cur, d)
                 needs_fix = False
         if needs_fix: return False
@@ -293,7 +272,6 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
             rc.build_conveyor(next_pos, conveyor_dir)
         if rc.can_move(d):
             rc.move(d)
-            pf_state.past_pos = rc.get_position()
             moved = True
         
         # Possibly recompute if blocked
@@ -357,7 +335,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
-                        cost = ENTITY_COSTS[entt][0]
+                        cost = BARRIER_COST
                     else: continue
                 
             tentative = g_score[current] + cost

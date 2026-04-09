@@ -3,12 +3,16 @@ import sys
 
 from enum import Enum
 from bot import Bot
-from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
+from cambc import Controller, Direction, EntityType, Environment, Position
 from helpers import DIRECTIONS
+
+class Defence(Enum):
+    CORELAUNCHER = "AwayFromCore"
+    OTHER = "Defence"
 
 priorities = {
     EntityType.BUILDER_BOT: 60,
-    EntityType.CORE: 5,
+    EntityType.CORE: 50,
     EntityType.GUNNER: 100,
     EntityType.SENTINEL: 100,
     EntityType.BREACH: 100,
@@ -24,20 +28,15 @@ priorities = {
     EntityType.MARKER: 1,
 }
 
-# TODO prioritize transport that is deemed "critical"
-
 class SimpleShooter(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
         self.best_target = None
 
-        self.attack_dmg = GameConstants.SENTINEL_DAMAGE if rc.get_entity_type() == EntityType.SENTINEL else GameConstants.GUNNER_DAMAGE
-
     def start_turn(self):
         self.best_target = None
 
         attackables = self.rc.get_attackable_tiles()
-        print(len(attackables))
         priority = -100000
         for p in attackables:
             e = self.rc.get_tile_building_id(p)
@@ -47,24 +46,16 @@ class SimpleShooter(Bot):
                 if self.rc.get_team(e) == self.rc.get_team():
                     continue
                 entt = self.rc.get_entity_type(e)
-                
-                score = priorities[entt]
-                if score < 0: continue
-                
-                score -= ((self.rc.get_hp(e) / self.attack_dmg) * 10)
-
-                if score > priority and self.rc.can_fire(p):
-                    priority = score
+                if priorities[entt] < 0: continue
+                if priorities[entt] > priority and self.rc.can_fire(p):
+                    priority = priorities[entt]
                     self.best_target = p
             if bb is not None:
                 if self.rc.get_team(bb) == self.rc.get_team():
                     continue
-                score =  priorities[EntityType.BUILDER_BOT]
-                score -= ((self.rc.get_hp(bb) / self.attack_dmg) * 10)
-                
-                
-                if score > priority and self.rc.can_fire(p):
-                    priority = score
+                if priorities[EntityType.BUILDER_BOT] < 0: continue
+                if priorities[EntityType.BUILDER_BOT] > priority and self.rc.can_fire(p):
+                    priority = priorities[EntityType.BUILDER_BOT]
                     self.best_target = p
 
         pass
