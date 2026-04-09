@@ -26,18 +26,17 @@ priorities = {
 
 # TODO prioritize transport that is deemed "critical"
 
-class SimpleShooter(Bot):
+class Sentinel(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
         self.best_target = None
 
-        self.attack_dmg = GameConstants.SENTINEL_DAMAGE if rc.get_entity_type() == EntityType.SENTINEL else GameConstants.GUNNER_DAMAGE
+        self.attack_dmg = GameConstants.SENTINEL_DAMAGE
 
     def start_turn(self):
         self.best_target = None
 
         attackables = self.rc.get_attackable_tiles()
-        print(len(attackables))
         priority = -100000
         for p in attackables:
             e = self.rc.get_tile_building_id(p)
@@ -61,7 +60,6 @@ class SimpleShooter(Bot):
                     continue
                 score =  priorities[EntityType.BUILDER_BOT]
                 score -= ((self.rc.get_hp(bb) / self.attack_dmg) * 10)
-                
                 
                 if score > priority and self.rc.can_fire(p):
                     priority = score

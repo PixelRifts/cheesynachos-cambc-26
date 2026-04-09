@@ -1,7 +1,7 @@
 # Test runner config for testing/run_tests.py
 
 # Bot to evaluate
-target_bot = "sprint4_patrols"
+target_bot = "sprint4_unify"
 # target_bot = "sprint3_core"
 
 # Opponents to test against.

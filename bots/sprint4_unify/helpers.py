@@ -36,7 +36,25 @@ def dist_to_nearest_target(x: Position, target_tiles: list[Position]):
             if best == 0:
                 break
     return best
-        
+
+def get_ti_cost(rc: Controller, entt: EntityType) -> int:
+    match entt:
+        case EntityType.BUILDER_BOT: return rc.get_builder_bot_cost()[0]
+        case EntityType.CORE: return 0
+        case EntityType.GUNNER: return rc.get_gunner_cost()[0]
+        case EntityType.SENTINEL: return rc.get_sentinel_cost()[0]
+        case EntityType.BREACH: return rc.get_breach_cost()[0]
+        case EntityType.LAUNCHER: return rc.get_launcher_cost()[0]
+        case EntityType.CONVEYOR: return rc.get_conveyor_cost()[0]
+        case EntityType.SPLITTER: return rc.get_splitter_cost()[0]
+        case EntityType.ARMOURED_CONVEYOR: return rc.get_armoured_conveyor_cost()[0]
+        case EntityType.BRIDGE: return rc.get_bridge_cost()[0]
+        case EntityType.HARVESTER: return rc.get_harvester_cost()[0]
+        case EntityType.FOUNDRY: return rc.get_foundry_cost()[0]
+        case EntityType.ROAD: return rc.get_road_cost()[0]
+        case EntityType.BARRIER: return rc.get_barrier_cost()[0]
+        case EntityType.MARKER: return 0
+
 # Symmetry Functions:
 
 class Symmetry(Enum):
