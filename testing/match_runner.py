@@ -2,6 +2,8 @@
 
 import subprocess
 import re
+import random
+
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 from datetime import datetime
@@ -10,9 +12,10 @@ from datetime import datetime
 class MatchResult:
     """Represents the result of a single match."""
     
-    def __init__(self, bot1: str, bot2: str, map_name: str, 
+    def __init__(self, id: int, bot1: str, bot2: str, map_name: str, 
                  winner: Optional[str], score: Tuple[int, int],
                  timestamp: datetime, error: Optional[str] = None):
+        self.id = id
         self.bot1 = bot1
         self.bot2 = bot2
         self.map_name = map_name
@@ -23,8 +26,8 @@ class MatchResult:
     
     def __repr__(self):
         if self.error:
-            return f"MatchResult({self.bot1} vs {self.bot2} on {self.map_name}: ERROR - {self.error})"
-        return f"MatchResult({self.bot1} vs {self.bot2} on {self.map_name}: Winner={self.winner}, Score={self.score})"
+            return f"MatchResult[{str(self.id)}]({self.bot1} vs {self.bot2} on {self.map_name}: ERROR - {self.error})"
+        return f"MatchResult[{str(self.id)}]({self.bot1} vs {self.bot2} on {self.map_name}: Winner={self.winner}, Score={self.score})"
 
 
 class MatchRunner:
@@ -51,6 +54,7 @@ class MatchRunner:
             MatchResult object with match outcome
         """
         timestamp = datetime.now()
+        this_id = random.randint(0, 100000)
         
         try:
             # Construct full map path
@@ -58,20 +62,20 @@ class MatchRunner:
             map_file = maps_dir / f"{map_name}.map26"
             
             result = subprocess.run(
-                ["cambc", "run", bot1, bot2, str(map_file), "--seed", str(seed)],
+                ["cambc", "run", bot1, bot2, str(map_file), "--seed", str(seed), "--replay", "replays/replay_"+str(this_id)+".replay26"],
                 cwd=self.root_dir,
                 capture_output=True,
                 text=True,
                 timeout=300
             )
-            
+
             winner, score = self._parse_output(result.stdout, result.stderr, bot1, bot2)
-            return MatchResult(bot1, bot2, map_name, winner, score, timestamp)
+            return MatchResult(this_id, bot1, bot2, map_name, winner, score, timestamp)
             
         except subprocess.TimeoutExpired:
-            return MatchResult(bot1, bot2, map_name, None, (0, 0), timestamp, error="Timeout")
+            return MatchResult(this_id, bot1, bot2, map_name, None, (0, 0), timestamp, error="Timeout")
         except Exception as e:
-            return MatchResult(bot1, bot2, map_name, None, (0, 0), timestamp, error=str(e))
+            return MatchResult(this_id, bot1, bot2, map_name, None, (0, 0), timestamp, error=str(e))
     
     def _parse_output(self, stdout: str, stderr: str, bot1: str, bot2: str) -> Tuple[Optional[str], Tuple[int, int]]:
         """Parse cambc output to determine winner and score.

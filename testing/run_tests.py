@@ -6,6 +6,7 @@ using multi-threaded execution.
 
 import sys
 import os
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -102,6 +103,10 @@ def main():
         raw_maps = test_cfg.get("maps", ["all"])
         if "all" in raw_maps:
             test_maps = maps
+        elif "sample10" in raw_maps:
+            test_maps = random.sample(maps, 10)
+        elif "sample20" in raw_maps:
+            test_maps = random.sample(maps, 20)
         else:
             test_maps = [m for m in raw_maps if m in maps]
             if not test_maps:

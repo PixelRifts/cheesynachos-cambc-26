@@ -106,20 +106,23 @@ class ResultsAnalyzer:
             writer = csv.writer(f)
             
             # Header
-            writer.writerow(['Timestamp', 'Bot1', 'Bot2', 'Map', 'Winner', 
-                           'Score_Bot1', 'Score_Bot2', 'Error'])
+            writer.writerow(['Timestamp', 'ID', 'Bot1', 'Bot2', 'Map', 'Winner', 
+                           'Score_Bot1', 'Score_Bot2', 'Error', '', 'Command'])
             
             # Data rows
             for result in results:
                 writer.writerow([
                     result.timestamp.isoformat(),
+                    result.id,
                     result.bot1,
                     result.bot2,
                     result.map_name,
                     result.winner or 'N/A',
                     result.score[0],
                     result.score[1],
-                    result.error or ''
+                    result.error or '',
+                    '',
+                    "cambc run " + result.bot1 + " " + result.bot2 + " --watch maps/" + result.map_name + ".map26",
                 ])
         
         return csv_path

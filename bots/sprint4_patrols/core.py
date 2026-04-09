@@ -21,14 +21,12 @@ class Core(Bot):
     def mark_rescue_operation(self, bldg_id: int):
         if bldg_id in self.active_rescue_ops:
             self.active_rescue_ops.remove(bldg_id)
-            self.active_rescue_ops.append(bldg_id)
-            return
-
         self.active_rescue_ops.append(bldg_id)
 
     def start_turn(self):
         (ti, ax) = self.rc.get_global_resources()
         self.ti_tracker.append(ti)
+
         self.ore_dir = None
 
         for t in self.rc.get_nearby_tiles():
@@ -52,8 +50,10 @@ class Core(Bot):
             if self.healer_needed(): print("Healer needed!")
             else: print("Enemy builder bot spotted!")
             self.spawn_healer()
-            
+        
         target = 2 + turn // 80
+        # if self.rc.get_current_round() > 50: target = 4 + turn // 80
+        # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
         # target = 1
         if self.econ_count + self.rush_count < target:        
             if 2*self.econ_count <= self.rush_count:
@@ -115,7 +115,7 @@ class Core(Bot):
                 return True
 
         return False
-
+    
     def sees_enemy_builder_bot(self) -> bool:
         for t in self.rc.get_nearby_tiles():
             if not self.rc.is_in_vision(t):

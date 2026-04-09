@@ -8,7 +8,7 @@ from typing import Optional
 from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
 
-RANDOM_SEED = 1234578
+RANDOM_SEED = 1278
 
 ENTITY_TRANSPORT   = { EntityType.CONVEYOR, EntityType.BRIDGE, EntityType.SPLITTER, EntityType.ARMOURED_CONVEYOR }
 ENTITY_TURRET      = { EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH, EntityType.LAUNCHER }
@@ -19,7 +19,7 @@ ENTITY_UNWALKABLE  = { EntityType.HARVESTER, EntityType.FOUNDRY, EntityType.BARR
 ENTITY_WALKABLE    = ENTITY_TRIVIAL | ENTITY_TRANSPORT
 ENTITY_DIRECTIONAL = { EntityType.CONVEYOR, EntityType.ARMOURED_CONVEYOR, EntityType.SPLITTER, EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH }
 
-ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER }
+ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
 ENTITY_VALID_BLOCKAGE_FRIENDLY = ENTITY_TURRET | ENTITY_TRANSPORT
 
     
@@ -124,6 +124,20 @@ def is_enemy_transport(rc: Controller, pos: Position) -> bool:
 
 
 # Adjacency Stuff
+
+def get_best_placable_adj_ignorebb(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not (is_pos_turretable(rc, p) and not is_enemy_transport(rc, p)): continue
+        dist = p.distance_squared(b)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
 
 def get_best_placable_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
     best_dist = 1000000
