@@ -73,6 +73,7 @@ class Sense:
         self.feed_graph: Dict[Position, Set[Position]] = {}
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
+        self.healing_builders: Set[int] = set()
         
         self.nearest_to_heal: Position = None
         self.nearest_to_heal_dist = 100000000
@@ -138,6 +139,7 @@ class Sense:
         for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
         self.enemy_builders.clear()
+        self.healing_builders.clear()
         self.transport_attack_blacklist.clear()
         self.nearest_to_heal: Position = None
         self.nearest_to_heal_dist = 100000000
@@ -182,9 +184,12 @@ class Sense:
                     if not is_in_map(p, self.map_width, self.map_height): continue
                     if not self.rc.is_in_vision(p): continue
                     bb = self.rc.get_tile_builder_bot_id(p)
-                    if bb is not None and self.rc.get_team(bb) == self.rc.get_team() and bb != self.rc.get_id():
+                    if bb is not None and self.rc.get_team(bb) == self.rc.get_team() and bb != self.rc.get_id() and bb not in self.healing_builders:
                         bot_marked = True
+                        self.healing_builders.add(bb)
                         break
+                # If building is in danger ignore bot_marked
+                if self.rc.get_hp(bldg) < 9: bot_marked = False
 
                 if d < self.nearest_to_heal_dist and not bot_marked:
                     self.nearest_to_heal_dist = d

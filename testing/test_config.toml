@@ -6,16 +6,16 @@ target_bot = "sprint4_unify"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["test1_no_prot"]
+opponents = ["sprint4_patrols"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
-# Use "sample10" or "sample20" to sample a random set of 10/20 maps
+# Use "sample10", "sample20", "sample30" or "sample40" to sample a random set of 10/20/30/40 maps
 # maps = ["all"]
 maps = ["all"]
 
 # Execution settings
-threads = 15
+threads = 8
 matches_per = 2
 seed = 1
 save_csv = true

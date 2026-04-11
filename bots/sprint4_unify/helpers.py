@@ -239,7 +239,6 @@ def get_best_empty_adj_with_diag(rc: Controller, a: Position, b: Position) -> Di
             best_dir = d
     return best_dir
 
-
 def is_adjacent(a: Position, b: Position, debug: bool = False) -> bool:
     dx = abs(a.x - b.x)
     dy = abs(a.y - b.y)

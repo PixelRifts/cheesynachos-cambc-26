@@ -43,6 +43,8 @@ class Sentinel(Bot):
             bb = self.rc.get_tile_builder_bot_id(p)
 
             if e is not None:
+                if bb is not None and self.rc.get_team(bb) == self.rc.get_team():
+                    continue
                 if self.rc.get_team(e) == self.rc.get_team():
                     continue
                 entt = self.rc.get_entity_type(e)

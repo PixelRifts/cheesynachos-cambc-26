@@ -45,7 +45,6 @@ class PFState:
         self.closed_set = set()
         self.came_from = {}
         self.g_score = {}
-        self.preempted = False
         self.reset()
 
     def reset(self):
@@ -64,6 +63,7 @@ class PFState:
         
         self.result_path.clear()
         self.computed_this_turn = False
+        self.preempted = False
 
         # Silly Bug
         self.virtual_target = Position(0, 0)
@@ -76,7 +76,7 @@ class PFState:
         self.validate = False
 
 pf_state = PFState()
-cached_pf_state = PFState()
+# cached_pf_state = PFState()
 def clear():
     pf_state.computed_this_turn = False
 
@@ -118,6 +118,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
             rc.destroy(next_pos)
         if rc.can_move(d):
             rc.move(d)
+            pf_state.past_pos = rc.get_position()
             moved = True
         elif rc.can_build_road(next_pos):
             rc.build_road(next_pos)
@@ -224,10 +225,18 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
 def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_home: bool) -> bool:
     global pf_state, cached_pf_state
     cur = rc.get_position()
-    if cur == target: return True
+    if cur == target:
+        pf_state.past_pos = None
+        return True
+
+    if (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()) and not pf_state.preempted:
+        pf_state.preempted = True
+        print("preempted===============", pf_state.past_pos)
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target:
+    print(pf_state.astar_active, not pf_state.result_path, pf_state.goal, target)
+    if not pf_state.preempted and ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target):
+        print('got reset')
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
@@ -237,16 +246,9 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         if pf_state.computed_this_turn: return False
 
     # Premption because bb was launched
-    if (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()) and not pf_state.preempted:
-        pf_state.preempted = True
-        print("preempted===============", pf_state.past_pos)
-        cached_pf_state = pf_state
-        
     if pf_state.preempted:
-        if fast_pathfind_to(rc, sense, target, ignore_builder_at_tgt=True):
+        if silly_pathfind_to(rc, pf_state.past_pos):
             pf_state.preempted = False
-            print("unpreempted===============")
-            pf_state = cached_pf_state
         return
     
     # continue A* for a limited budget
@@ -256,6 +258,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []
+        print('cleared')
         return
 
     if pf_state.result_path:
@@ -271,7 +274,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
                 rc.get_direction(rc.get_tile_building_id(cur)) == conveyor_dir
             )
         )
-        print(needs_fix)
+        print('cardinalpf needs_fix', needs_fix)
 
         if needs_fix:
             if entt is not None:
@@ -321,7 +324,9 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         else:
             pf_state.result_path.pop(0)
             
-        if rc.get_position() == target: return True
+        if rc.get_position() == target: 
+            pf_state.past_pos = None
+            return True
 
 
 def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: int):
@@ -641,6 +646,7 @@ def simple_step(rc: Controller, d: Direction):
         rc.build_road(p)
         if rc.can_move(d):
             rc.move(d)
+            pf_state.past_pos = rc.get_position()
 
 def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Direction) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()):
