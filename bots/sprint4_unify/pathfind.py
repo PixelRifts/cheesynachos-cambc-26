@@ -229,13 +229,9 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         pf_state.past_pos = None
         return True
 
-    if (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()) and not pf_state.preempted:
-        pf_state.preempted = True
-        print("preempted===============", pf_state.past_pos)
-
     # start / restart A*
     print(pf_state.astar_active, not pf_state.result_path, pf_state.goal, target)
-    if not pf_state.preempted and ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target):
+    if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target):
         print('got reset')
         pf_state.reset()
         pf_state.astar_active = True
@@ -245,12 +241,6 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         heappush(pf_state.open_set, (0, cur))
         if pf_state.computed_this_turn: return False
 
-    # Premption because bb was launched
-    if pf_state.preempted:
-        if silly_pathfind_to(rc, pf_state.past_pos):
-            pf_state.preempted = False
-        return
-    
     # continue A* for a limited budget
     if pf_state.astar_active:
         step_cardinal_astar_internal(rc, sense, max_expansions=200)
@@ -268,14 +258,14 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         # Possibly fix conveyor this bot is standing on
         conveyor_dir = d
         entt = sense.get_entity(cur)
+        is_allied = sense.is_allied(cur)
         needs_fix = (entt is None or \
             not (
                 entt == EntityType.CONVEYOR and
                 rc.get_direction(rc.get_tile_building_id(cur)) == conveyor_dir
             )
-        )
-        print('cardinalpf needs_fix', needs_fix)
-
+        ) and not (entt == EntityType.CORE and is_allied)
+        
         if needs_fix:
             if entt is not None:
                 allied = sense.is_allied(cur)

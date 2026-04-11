@@ -57,7 +57,7 @@ class Core(Bot):
         # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
         # target = 1
         if self.econ_count + self.rush_count < target:        
-            if 2*self.econ_count <= self.rush_count:
+            if self.econ_count <= self.rush_count:
                 self.spawn_econ()
                 return
             self.spawn_rush()

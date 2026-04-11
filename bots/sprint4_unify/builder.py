@@ -42,6 +42,7 @@ class BotState(Enum):
     RECOVER_GOTO_CORE = "Core"
 
 NO_STUCK_DETECTION_STATES = { BotState.ECON_CONNECT, BotState.CORE_HEALER }
+HEAL_EXCLUDE_STATES =       { BotState.ECON_CONNECT }
 
 class BuilderBot(Bot):
     def __init__(self, rc: Controller):
@@ -74,12 +75,12 @@ class BuilderBot(Bot):
             case BotJob.RUSH:
                 self.switch_state(BotState.ATTACK_GOTO)
                 self.sense.config(flow_tracking=True)
-        self.stuck_counter = 0
-        self.stuck_pos = self.rc.get_position()
 
 
     def reset_state_variables(self):
         self.pathfind_target: Position = None
+        self.stuck_counter = 0
+        self.stuck_pos = self.rc.get_position()
         
         # ECON_EXPLORE
         self.econ_explore_dir: Direction = biased_random_dir(self.rc)
@@ -101,10 +102,12 @@ class BuilderBot(Bot):
         self.econ_connect_saved_is_final: bool = False
         self.econ_connect_launcher_count: int = 0
         self.econ_connect_current_run: list[Position] = []
+        self.econ_connect_past_pos = self.rc.get_position()
 
         # DEFENCE_LINE
         self.defence_is_to_core = False
         self.defence_current_target = None
+        self.defence_use_fast = False
 
         # HEAL
         self.core_heal_target: Position = None
@@ -158,7 +161,7 @@ class BuilderBot(Bot):
         if self.rc.get_hp() < self.rc.get_max_hp():
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
-        elif self.sense.nearest_to_heal is not None and self.state not in { BotState.ECON_CONNECT, BotState.CORE_HEALER }:
+        elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
             self.meta_nearest_heal()
             return
 
@@ -210,12 +213,42 @@ class BuilderBot(Bot):
     # Econ
 
     def meta_nearest_heal(self):
-        print('healing')
         self.stuck_counter -= 1
-        if self.rc.get_position().distance_squared(self.sense.nearest_to_heal) > GameConstants.ACTION_RADIUS_SQ:
-            pathfind.silly_pathfind_to(self.rc, self.sense.nearest_to_heal)
-        if self.rc.can_heal(self.sense.nearest_to_heal):
-            self.rc.heal(self.sense.nearest_to_heal)
+        
+        # def not_my_problem(pos: Position) -> bool:
+        #     if self.rc.is_in_vision(pos):
+        #         bb = self.rc.get_tile_builder_bot_id(pos)
+        #         if bb is not None and bb != self.rc.get_id() and self.rc.get_team(bb) == self.rc.get_team():
+        #             return True # an allied builder bot at location.
+
+        #     for d in DIRECTIONS:
+        #         adj = pos.add(d)
+        #         if adj in self.sense.ally_builders:
+        #             return True
+        #     return False # vulnerable building that needs healing
+        
+        print('h')
+
+        to_heal = None
+        to_heal_dist = 100000
+        for t in self.sense.heal_targets:
+            d = self.rc.get_position().distance_squared(t)
+            if d < to_heal_dist:
+                to_heal_dist = d
+                to_heal = t
+        
+        if to_heal is not None:
+            self.rc.draw_indicator_dot(to_heal, 0, 255, 0)
+            
+            if self.rc.get_position().distance_squared(to_heal) > GameConstants.ACTION_RADIUS_SQ:
+                pathfind.silly_pathfind_to(self.rc, to_heal)
+                print('moving to heal target' + str(to_heal))
+                # no return - allow immediate heal
+
+            if self.rc.can_heal(to_heal):
+                self.rc.heal(to_heal)
+                # no return - allow checks
+        
 
     def econ_explore(self):
         my_pos = self.rc.get_position()
@@ -363,7 +396,8 @@ class BuilderBot(Bot):
                 self.pathfind_target = self.core_pos
 
     def econ_connect(self):
-        if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or self.econ_connect_protect_target == self.econ_connect_current_target:
+        if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
+            self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
             print('recompute')
             if self.econ_connect_current_is_final:
                 self.switch_state(BotState.ECON_EXPLORE)
@@ -413,6 +447,7 @@ class BuilderBot(Bot):
                 self.econ_connect_current_run.append(self.rc.get_position())
             
             # Commit the cached target, then it'll be fine :)
+            self.econ_connect_past_pos = self.rc.get_position()
             self.econ_connect_current_target = self.econ_connect_saved_target
             self.econ_connect_current_is_bridge = self.econ_connect_saved_is_bridge
             self.econ_connect_current_is_final = self.econ_connect_saved_is_final
@@ -436,16 +471,29 @@ class BuilderBot(Bot):
 
             pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
         else:
-            (ti, ax) = self.rc.get_global_resources()
-            if ti < 10: return
-            pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True)
+            if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
+                pathfind.silly_pathfind_to(self.rc, self.econ_connect_past_pos)
+            else:
+                if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
+                    self.econ_connect_past_pos = self.rc.get_position()
+                else:
+                    self.econ_connect_past_pos = None
 
     def econ_nuke(self):
         pass
 
     # Defence
     
+
     def defence_to_harvester(self):
+        self.defence_follow(self.sense.reverse_feed_graph, BotState.DEFENCE_TO_CORE)
+        pass
+    
+    def defence_to_core(self):
+        self.defence_follow(self.sense.feed_graph, BotState.DEFENCE_TO_HARVESTER)
+        pass
+    
+    def defence_follow(self, graph, back_is: BotState):
         # Init State
         if self.defence_current_target is None:
             self.defence_current_target = random.choice(tuple(self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BRIDGE]]))
@@ -462,21 +510,20 @@ class BuilderBot(Bot):
             curr = self.defence_current_target
             go_back = False
             changed = False
-            for i in range(5):
-                t = self.sense.reverse_feed_graph.get(curr, [])
-                found = None
-                for back in t:
-                    if not self.rc.is_in_vision(back): continue
-                    found = back
-                if found == None:
+            for i in range(1):
+                t = graph.get(curr, [])
+                t = [j for j in t if self.rc.is_in_vision(j)]
+                found = None if len(t) == 0 else random.choice(t)
+                if found == None or found in self.core_tiles or found in self.sense.ally_builders:
                     go_back = True
                     break
+                self.defence_use_fast = not is_adjacent(self.rc.get_position(), found)
                 curr = found
                 changed = True
-
+            
             if go_back and not changed:
                 starting_from = curr
-                self.switch_state(BotState.DEFENCE_TO_CORE)
+                self.switch_state(back_is)
                 self.defence_current_target = starting_from
                 return
 
@@ -484,131 +531,16 @@ class BuilderBot(Bot):
         
         # Actually Pathfind
         if self.defence_current_target is not None:
+            # if self.defence_use_fast:
+            #     pathfind.fast_pathfind_to(self.rc, self.sense, self.defence_current_target, ignore_builder_at_tgt=True)
+            # else:
             pathfind.silly_pathfind_to(self.rc, self.defence_current_target)
-        
-    def defence_to_core(self):
-        # Init State
-        if self.defence_current_target is None:
-            self.defence_current_target = random.choice(tuple(self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BRIDGE]]))
-            if self.defence_current_target is None:
-                self.switch_state(BotState.ECON_EXPLORE)
-                self.econ_explore_dir = biased_random_dir(self.rc)
-                self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
-                self.sense.config(flow_tracking=False)
-                return
 
-        # Forward Current Target
-        if is_adjacent_with_diag(self.rc.get_position(), self.defence_current_target):
-            # Iterate Forwards from defence_current_target a max of 5 times
-            curr = self.defence_current_target
-            go_back = False
-            changed = False
-            for i in range(5):
-                t = self.sense.feed_graph.get(curr, [])
-                found = None
-                for back in t:
-                    if not self.rc.is_in_vision(back): continue
-                    found = back
-                if found == None:
-                    go_back = True
-                    break
-                curr = found
-                changed = True
 
-            if go_back and not changed:
-                starting_from = curr
-                self.switch_state(BotState.DEFENCE_TO_HARVESTER)
-                self.defence_current_target = starting_from
-                return
-
-            self.defence_current_target = curr
-        
-        # Actually Pathfind
-        if self.defence_current_target is not None:
-            pathfind.silly_pathfind_to(self.rc, self.defence_current_target)
-    
     # Healer
 
     def core_healer(self):
-        
-        def not_my_problem(pos: Position) -> bool:
-            if self.rc.is_in_vision(pos):
-                bb = self.rc.get_tile_builder_bot_id(pos)
-                if bb is not None and bb != self.rc.get_id() and self.rc.get_team(bb) == self.rc.get_team():
-                    return True # an allied builder bot at location.
-
-            for d in DIRECTIONS:
-                adj = pos.add(d)
-                if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
-                if not self.rc.is_in_vision(adj): continue
-                bb = self.rc.get_tile_builder_bot_id(adj)
-                if bb is None: continue
-                if bb == self.rc.get_id(): continue
-                if self.rc.get_team(bb) == self.rc.get_team():
-                    return True # an allied builder bot adjacent to location.
-            return False # vulnerable building that needs healing
-        
-        if self.core_heal_target is None:
-            # best_heal_target = None
-            # best_heal_dist = 10000000
-            # for bldg in self.rc.get_nearby_buildings():
-            #     p = self.rc.get_position(bldg)
-                
-            #     allied = self.rc.get_team(bldg) == self.rc.get_team()
-            #     hp = self.rc.get_hp(bldg)
-            #     max_hp = self.rc.get_max_hp(bldg)
-            #     effective_hp = hp + 4 if not_my_problem(p) else hp
-                
-            #     if effective_hp < max_hp:
-            #         self.rc.draw_indicator_dot(p, 255, 0, 0)
-            #     if allied and (effective_hp < max_hp):
-            #         d = p.distance_squared(self.core_pos)
-            #         if d < best_heal_dist:
-            #             best_heal_dist = d
-            #             best_heal_target = p
-            if self.sense.nearest_to_heal is not None:
-                heal_dir = get_best_pathable_adj_with_diag(self.rc, self.sense.nearest_to_heal, self.rc.get_position())
-                self.pathfind_target = self.sense.nearest_to_heal.add(heal_dir)
-                self.core_heal_target = self.sense.nearest_to_heal
-            else:
-                pathfind.silly_pathfind_to(self.rc, self.core_pos)
-                return
-        
-        if self.core_heal_target is not None:
-            self.rc.draw_indicator_dot(self.core_heal_target, 0, 255, 0)
-
-            print('[HEAL]heal target: ', self.core_heal_target)
-            if not self.rc.is_in_vision(self.core_heal_target):
-                pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
-                return
-            
-            bldg = self.rc.get_tile_building_id(self.core_heal_target)
-            if bldg is None:
-                self.core_heal_target = None
-                pathfind.silly_pathfind_to(self.rc, self.core_pos)
-                return
-            
-            if not is_adjacent_with_diag(self.rc.get_position(), self.core_heal_target):
-                pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
-                print('moving to heal target' + str(self.pathfind_target))
-                # no return - allow immediate heal
-
-            if self.rc.can_heal(self.core_heal_target):
-                self.rc.heal(self.core_heal_target)
-                # no return - allow checks
-                
-
-            if self.rc.is_in_vision(self.core_heal_target):
-                bldg = self.rc.get_tile_building_id(self.core_heal_target)
-                if bldg is None:
-                    self.core_heal_target = None
-                    return
-
-                if self.rc.get_hp(bldg) >= self.rc.get_max_hp(bldg):
-                    self.core_heal_target = None
-                    return
-                return
-            return
+        pathfind.silly_pathfind_to(self.rc, self.core_pos)
 
     # Attack
 
@@ -640,20 +572,19 @@ class BuilderBot(Bot):
                     closest_harvester_dist = dist
                     closest_harvester = h
         if closest_harvester is not None:
-            self.switch_state(BotState.ATTACK_EXEC_PLAN)
-            # self.attack_plan = self.get_attack_plan(closest_harvester)
-            # self.attack_target = closest_harvester
-            # self.pathfind_target = my_pos
             target_dir = get_best_placable_adj_ignorebb(self.rc, closest_harvester, self.rc.get_position())
-            self.attack_target = closest_harvester.add(target_dir)
-            self.attack_feeder = closest_harvester
-            self.attack_plan = EntityType.SENTINEL
-            self.attack_plan_dir = self.attack_target.direction_to(self.enemy_core_pos)
-            if self.attack_plan_dir == self.attack_target.direction_to(closest_harvester): self.attack_plan_dir = self.attack_plan_dir.rotate_left()
-            self.attack_from = self.attack_target.add(get_best_pathable_adj_with_diag(self.rc, self.attack_target, my_pos))
-            self.attack_return_to_econ = False
-            self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
-            return
+            target_pos = closest_harvester.add(target_dir)
+            if self.sense.get_entity(target_pos) not in ENTITY_ATTACK_NOREPLACE:
+                self.switch_state(BotState.ATTACK_EXEC_PLAN)
+                self.attack_target = target_pos
+                self.attack_feeder = closest_harvester
+                self.attack_plan = EntityType.SENTINEL
+                self.attack_plan_dir = target_pos.direction_to(self.enemy_core_pos)
+                if self.attack_plan_dir == target_pos.direction_to(closest_harvester): self.attack_plan_dir = self.attack_plan_dir.rotate_left()
+                self.attack_from = target_pos.add(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
+                self.attack_return_to_econ = False
+                self.rc.draw_indicator_dot(target_pos, 255, 0, 0)
+                return
 
         # Possibly eliminate symmetry
         if self.sense.is_seen(self.enemy_core_pos):
@@ -735,6 +666,10 @@ class BuilderBot(Bot):
             return
 
         print('try destroy', self.attack_target)
+        entt = self.sense.get_entity(self.attack_target)
+        if entt == self.attack_plan or entt in ENTITY_ATTACK_NOREPLACE:
+            self.switch_back_to_neutral(self.attack_return_to_econ)
+            return
         if not try_destroy(self.rc, self.sense, self.attack_from, self.attack_target, \
             ti_min=get_ti_cost(self.rc, self.attack_plan) + get_ti_cost(self.rc, EntityType.ROAD)): return
 
@@ -756,7 +691,7 @@ class BuilderBot(Bot):
     # Recovery
 
     def recover_goto_core(self):
-        pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos, ignore_builder_at_tgt=True)
+        pathfind.silly_pathfind_to(self.rc, self.core_pos)
 
         if self.rc.get_position().distance_squared(self.core_pos) <= 3:
             self.switch_state(BotState.ECON_EXPLORE)

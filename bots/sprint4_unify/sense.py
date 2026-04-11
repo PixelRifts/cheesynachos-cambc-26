@@ -73,10 +73,8 @@ class Sense:
         self.feed_graph: Dict[Position, Set[Position]] = {}
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
-        self.healing_builders: Set[int] = set()
+        self.heal_targets: Set[Position] = set()
         
-        self.nearest_to_heal: Position = None
-        self.nearest_to_heal_dist = 100000000
         self.turret_cost_map = array('i', [0] * self.size)
     
         self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
@@ -139,11 +137,10 @@ class Sense:
         for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
         self.enemy_builders.clear()
-        self.healing_builders.clear()
+        self.heal_targets.clear()
+        
         self.transport_attack_blacklist.clear()
-        self.nearest_to_heal: Position = None
-        self.nearest_to_heal_dist = 100000000
-
+        
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
         if self.flow_tracking:
@@ -174,26 +171,9 @@ class Sense:
             # Commit information about tile
             self.set_entt_and_env(t, dir, entt, env, allied)
 
-            # Nearest Heal target
+            # Heal targets
             if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
-                d = self.rc.get_position().distance_squared(t)
-                
-                bot_marked = False
-                for indir in DIRECTIONS:
-                    p = t.add(indir)
-                    if not is_in_map(p, self.map_width, self.map_height): continue
-                    if not self.rc.is_in_vision(p): continue
-                    bb = self.rc.get_tile_builder_bot_id(p)
-                    if bb is not None and self.rc.get_team(bb) == self.rc.get_team() and bb != self.rc.get_id() and bb not in self.healing_builders:
-                        bot_marked = True
-                        self.healing_builders.add(bb)
-                        break
-                # If building is in danger ignore bot_marked
-                if self.rc.get_hp(bldg) < 9: bot_marked = False
-
-                if d < self.nearest_to_heal_dist and not bot_marked:
-                    self.nearest_to_heal_dist = d
-                    self.nearest_to_heal = t
+                self.heal_targets.add(t)
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
@@ -209,7 +189,7 @@ class Sense:
             # Save Builder Bots
             bb = self.rc.get_tile_builder_bot_id(t)
             if bb is not None:
-                if self.rc.get_team(bb) == self.rc.get_team():
+                if self.rc.get_team(bb) == self.rc.get_team() and self.rc.get_id() != bb:
                     self.ally_builders.add(t)
                 else:
                     self.enemy_builders.add(t)
@@ -285,6 +265,7 @@ class Sense:
         
         cost = TURRET_ATTACK_COSTS.get(e, 0) * mult
         for t in tiles:
+            if not is_in_map(t, self.map_width, self.map_height): continue
             self.turret_cost_map[self.idx(t)] += cost
             self.rc.draw_indicator_dot(t, 0, 0, 255)
 
