@@ -5,6 +5,9 @@ from cambc import Controller, Direction, EntityType, Environment, Position
 from helpers import *
 from collections import deque
 
+AXIONITE_STOCKPILE_THRESHOLD_ROUND = 1200
+AXIONITE_MIN_STOCKPILE = 41
+
 class Core(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
@@ -24,8 +27,15 @@ class Core(Bot):
         self.active_rescue_ops.append(bldg_id)
 
     def start_turn(self):
+        ti, ax = self.rc.get_global_resources()
+        if self.rc.get_current_round() < AXIONITE_STOCKPILE_THRESHOLD_ROUND:
+            excess = ax - AXIONITE_MIN_STOCKPILE
+            if excess > 0:
+                self.rc.convert(excess)
+            ti, ax = self.rc.get_global_resources()
+
         print(len(self.active_rescue_ops))
-        (ti, ax) = self.rc.get_global_resources()
+        
         self.ti_tracker.append(ti)
 
         self.ore_dir = None
@@ -56,18 +66,23 @@ class Core(Bot):
         # if self.rc.get_current_round() > 50: target = 4 + turn // 80
         # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
         # target = 1
+        print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:        
-            if self.econ_count <= self.rush_count:
+            if self.econ_count <= 2*self.rush_count:
                 self.spawn_econ()
                 return
-            self.spawn_rush()
+            if not self.spawn_rush():
+                self.spawn_econ()
             return
 
     def spawn_econ(self):
         if self.ore_dir is not None:
             spawn_pos = self.rc.get_position().add(self.ore_dir)
+            if not self.rc.can_spawn(spawn_pos):
+                spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
         else:
             spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
+
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
             self.econ_count += 1
@@ -77,6 +92,8 @@ class Core(Bot):
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
             self.rush_count += 1
+            return True
+        return False
 
     def spawn_healer(self):
         spawn_pos = self.rc.get_position()

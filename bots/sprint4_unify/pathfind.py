@@ -294,6 +294,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         moved = False
         allied = sense.is_allied(next_pos)
         if allied:
+            if next_pos in sense.ally_builders: return # Wait a turn if blocked by a guy
             if rc.can_destroy(next_pos): rc.destroy(next_pos)
         else:
             if rc.can_fire(next_pos): rc.fire(next_pos)

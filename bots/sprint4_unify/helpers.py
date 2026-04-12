@@ -22,8 +22,9 @@ ENTITY_GUNNER_PASS = { None, EntityType.MARKER }
 
 ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
 ENTITY_VALID_BLOCKAGE_FRIENDLY = ENTITY_TURRET | ENTITY_TRANSPORT
-ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } | ENTITY_TRANSPORT
+ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } # | ENTITY_TRANSPORT
 
+ENTITY_BASE_BLOCK = { EntityType.BARRIER, EntityType.FOUNDRY, EntityType.SPLITTER }
     
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
@@ -271,6 +272,16 @@ DIRECTIONS_ORDERED_CARDINALS_FIRST = [
     Direction.SOUTH, Direction.WEST,
     Direction.NORTHEAST, Direction.SOUTHEAST,
     Direction.SOUTHWEST, Direction.NORTHWEST,
+]
+CORE_SPLITTER_DIRECTIONS = [
+    (Direction.EAST, Direction.NORTHEAST),
+    (Direction.EAST, Direction.SOUTHEAST),
+    (Direction.WEST, Direction.NORTHWEST),
+    (Direction.WEST, Direction.SOUTHWEST),
+    (Direction.NORTH, Direction.NORTHWEST),
+    (Direction.NORTH, Direction.NORTHEAST),
+    (Direction.SOUTH, Direction.SOUTHWEST),
+    (Direction.SOUTH, Direction.SOUTHEAST),
 ]
 
 def degrees_between(d1, d2):
