@@ -6,7 +6,7 @@ from sense import *
 
 from typing import Optional
 from enum import Enum
-from cambc import Controller, Environment, Position, Direction, EntityType
+from cambc import Controller, Environment, Position, Direction, EntityType, ResourceType
 
 RANDOM_SEED = 1278
 
@@ -24,7 +24,7 @@ ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER } | ENTIT
 ENTITY_VALID_BLOCKAGE_FRIENDLY = ENTITY_TURRET | ENTITY_TRANSPORT
 ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } # | ENTITY_TRANSPORT
 
-ENTITY_BASE_BLOCK = { EntityType.BARRIER, EntityType.FOUNDRY, EntityType.SPLITTER }
+RESOURCE_ALLOWED_AMMO = { ResourceType.TITANIUM, ResourceType.REFINED_AXIONITE }
     
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
