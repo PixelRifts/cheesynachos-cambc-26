@@ -26,7 +26,7 @@ priorities = {
 
 # TODO prioritize transport that is deemed "critical"
 
-class Sentinel(Bot):
+class Gunner(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
         self.best_target = None
@@ -43,8 +43,6 @@ class Sentinel(Bot):
             bb = self.rc.get_tile_builder_bot_id(p)
 
             if e is not None:
-                if bb is not None and self.rc.get_team(bb) == self.rc.get_team():
-                    continue
                 if self.rc.get_team(e) == self.rc.get_team():
                     continue
                 entt = self.rc.get_entity_type(e)

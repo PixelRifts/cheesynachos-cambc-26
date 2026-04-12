@@ -3,6 +3,7 @@ import sense
 import pathfind
 import random
 import heapq
+import micro
 
 from bot import Bot
 from helpers import *
@@ -61,7 +62,7 @@ class BuilderBot(Bot):
         self.enemy_core_pos = get_symmetric(self.core_pos, self.sense.map_width, self.sense.map_height, self.sense.symmetries_possible[0])
         self.rush_spawn_pos = self.core_pos.add(self.core_pos.direction_to(self.map_center_pos))
         self.harvester_blacklist = set()
-        self.foundry_locked = set()
+        self.attack_poi_set: set[Position] = set()
 
         self.attack_blacklist_queue: deque[(Position, int)] = deque()
         self.attack_blacklist_set: set[Position] = set()
@@ -123,6 +124,7 @@ class BuilderBot(Bot):
         self.attack_from: Position = None
         self.attack_return_to_econ: bool = False
         self.attack_plan_timeout = 30
+        self.attack_poi_set.clear()
 
     def switch_state(self, state: BotState):
         self.state = state
@@ -558,7 +560,6 @@ class BuilderBot(Bot):
     # Attack
 
     def attack_goto(self):
-        # if self.rc.get_current_round() < 100: self.verify_defences()
         my_pos = self.rc.get_position()
 
         # Pathfind
@@ -574,30 +575,19 @@ class BuilderBot(Bot):
         else:
             pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
 
+        self.attack_poi_set.clear()
+
         # Find econ crippling target
-        closest_harvester = None
-        closest_harvester_dist = 10000000
         harvesters = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.HARVESTER]]
         for h in harvesters:
             if self.should_attack_harvester(h):
-                dist = h.distance_squared(my_pos)
-                if dist < closest_harvester_dist:
-                    closest_harvester_dist = dist
-                    closest_harvester = h
-        if closest_harvester is not None:
-            target_dir = get_best_placable_adj_ignorebb(self.rc, closest_harvester, self.rc.get_position())
-            target_pos = closest_harvester.add(target_dir)
-            if self.sense.get_entity(target_pos) not in ENTITY_ATTACK_NOREPLACE:
-                self.switch_state(BotState.ATTACK_EXEC_PLAN)
-                self.attack_target = target_pos
-                self.attack_feeder = closest_harvester
-                self.attack_plan = EntityType.SENTINEL
-                self.attack_plan_dir = target_pos.direction_to(self.enemy_core_pos)
-                if self.attack_plan_dir == target_pos.direction_to(closest_harvester): self.attack_plan_dir = self.attack_plan_dir.rotate_left()
-                self.attack_from = target_pos.add(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
-                self.attack_return_to_econ = False
-                self.rc.draw_indicator_dot(target_pos, 255, 0, 0)
-                return
+                for d in CARDINAL_DIRECTIONS:
+                    p = h.add(d)
+                    if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+                    if p in self.sense.transport_attack_blacklist: continue
+                    if not self.rc.is_in_vision(p): continue
+                    if not is_pos_turretable(self.rc, p): continue
+                    self.attack_poi_set.add(p)
 
         # Possibly eliminate symmetry
         if self.sense.is_seen(self.enemy_core_pos):
@@ -606,22 +596,6 @@ class BuilderBot(Bot):
 
         # Find suitable attack target
         if self.sense.enemy_core_found is not None:
-            attack_possibilities = []
-            for h in harvesters:
-                for d in CARDINAL_DIRECTIONS:
-                    c = h.add(d)
-                    if not is_in_map(c, self.sense.map_width, self.sense.map_height): continue
-                    if c in self.sense.transport_attack_blacklist: continue
-                    if not self.rc.is_in_vision(c): continue
-                    if not is_pos_turretable(self.rc, c): continue
-                    
-                    # Also make sure there are actually enemy bldgs to attack nearby
-                    # if c.distance_squared(self.enemy_core_pos) > GameConstants.GUNNER_VISION_RADIUS_SQ: continue
-                    if c in self.sense.ally_builders: continue
-
-                    attack_possibilities.append((c, True, h))
-            
-            
             transports = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.SPLITTER]] | \
                          self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.CONVEYOR]] | \
                          self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BRIDGE]]
@@ -630,26 +604,28 @@ class BuilderBot(Bot):
                 if not self.rc.is_in_vision(c): continue
                 bldg = self.rc.get_tile_building_id(c)
                 if self.rc.get_team(bldg) == self.rc.get_team(): continue
-                
-                if self.rc.get_stored_resource_id(bldg) is None: continue
-                if c.distance_squared(self.enemy_core_pos) > GameConstants.GUNNER_VISION_RADIUS_SQ: continue
+                if self.rc.get_stored_resource(bldg) not in RESOURCE_ALLOWED_AMMO: continue
                 if c in self.sense.ally_builders: continue
+                self.attack_poi_set.add(c)
+        
+        best_poi = None
+        best_score = -10000000
+        for poi in self.attack_poi_set:
+            score = micro.score_attack_poi(self.rc, self.sense, poi)
+            if score > best_score:
+                best_score = score
+                best_poi = poi
 
-                attack_possibilities.append((c, True, None))
-            
-            if len(attack_possibilities) > 0:
-                self.switch_state(BotState.ATTACK_EXEC_PLAN)
-                c, is_sentinel, feeder = random.choice(attack_possibilities)
-                self.attack_target = c
-                self.attack_feeder = feeder
-                self.attack_plan = EntityType.SENTINEL if is_sentinel else EntityType.GUNNER
-                self.attack_plan_dir = c.direction_to(self.enemy_core_pos)
-                if feeder is not None:
-                    if self.attack_plan_dir == c.direction_to(feeder): self.attack_plan_dir = self.attack_plan_dir.rotate_left()
-                self.attack_from = c.add(get_best_pathable_adj_with_diag(self.rc, c, my_pos))
-                self.attack_return_to_econ = False
-                self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
-                return
+        if best_poi is not None:
+            target, frm, plan, dir = micro.poi_attack_plan(self.rc, self.sense, poi)
+            self.switch_state(BotState.ATTACK_EXEC_PLAN)
+            self.attack_target = target
+            self.attack_plan = plan
+            self.attack_plan_dir = dir
+            self.attack_from = frm
+            self.attack_return_to_econ = False
+            self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
+            return
 
     def attack_block_ore(self):
         pass
@@ -889,8 +865,6 @@ class BuilderBot(Bot):
                 if nxt in visited and visited[nxt] <= ng: continue
 
                 visited[nxt] = ng
-                brightness = ng // cutoff
-                self.rc.draw_indicator_dot(nxt, brightness*255, brightness*255, brightness*255)
                 heapq.heappush(heap, (ng + h(nxt, end), ng, nxt))
         return True
 
@@ -1001,39 +975,6 @@ class BuilderBot(Bot):
         else:
             self.switch_state(BotState.ATTACK_GOTO)
             self.pathfind_target = self.enemy_core_pos
-
-    def verify_defences(self):
-        # my_pos = self.rc.get_position()
-        # for d in self.shuffled_directions:
-        #     ht = self.core_pos.add(d)
-        #     t = ht.add(d)
-        #     if not is_in_map(t, self.sense.map_width, self.sense.map_height): continue
-        #     if not self.rc.is_in_vision(t): continue
-        #     if self.sense.get_env == Environment.WALL: continue
-        #     if self.sense.get_entity(t) in ENTITY_BASE_BLOCK: continue
-
-        #     self.rc.draw_indicator_dot(t, 255, 0, 0)
-        #     if not try_destroy(self.rc, self.sense, ht, t): continue
-        #     if not self.rc.can_build_barrier(t): continue
-        #     self.rc.build_barrier(t)
-
-        for d1, d2 in self.shuffled_splitters:
-            ht = self.core_pos.add(d2)
-            t = ht.add(d1)
-
-            if not is_in_map(t, self.sense.map_width, self.sense.map_height): continue
-            if not self.rc.is_in_vision(t): continue
-            if self.sense.get_env == Environment.WALL: continue
-            if self.sense.get_entity(t) in ENTITY_BASE_BLOCK: continue
-
-            self.rc.draw_indicator_dot(t, 255, 0, 0)
-            if not try_destroy(self.rc, self.sense, None, t): return
-            
-            splitter_dir = d1.opposite()
-            if not self.rc.can_build_splitter(t, splitter_dir):
-                return
-            
-            self.rc.build_splitter(t, splitter_dir)
 
     def switch_to_possibly_patrol(self):
         patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)

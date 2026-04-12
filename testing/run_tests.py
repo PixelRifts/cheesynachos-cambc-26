@@ -107,6 +107,10 @@ def main():
             test_maps = random.sample(maps, 10)
         elif "sample20" in raw_maps:
             test_maps = random.sample(maps, 20)
+        elif "sample30" in raw_maps:
+            test_maps = random.sample(maps, 30)
+        elif "sample40" in raw_maps:
+            test_maps = random.sample(maps, 40)
         else:
             test_maps = [m for m in raw_maps if m in maps]
             if not test_maps:
@@ -168,9 +172,9 @@ def main():
                     completed += 1
                     
                     # Progress indicator
-                    if completed % max(1, total // 20) == 0 or completed == total:
-                        pct = (completed / total) * 100
-                        print(f"\rProgress: {completed}/{total} ({pct:.0f}%)", end='', flush=True)
+                    # if completed % max(1, total // UPDATE_RESOLUTION) == 0 or completed == total:
+                    pct = (completed / total) * 100
+                    print(f"\rProgress: {completed}/{total} ({pct:.0f}%)", end='', flush=True)
                     
                 except Exception as e:
                     print(f"\nError in match: {e}")
