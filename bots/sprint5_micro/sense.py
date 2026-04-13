@@ -148,6 +148,8 @@ class Sense:
                 self.remove_edges_from(t)
         
         for t in self.nearby_tiles:
+            already_seen = self.is_seen(t)
+            
             # Save Env and Buildings
             env = self.rc.get_tile_env(t)
             bldg = self.rc.get_tile_building_id(t)
@@ -194,16 +196,17 @@ class Sense:
                 else:
                     self.enemy_builders.add(t)
 
-            # Crack Symmetry
-            if len(self.symmetries_possible) > 1:
-                to_elim = []
-                for sym in self.symmetries_possible:
-                    test = get_symmetric(t, self.map_width, self.map_height, sym)
-                    env_here = self.get_env(test)
-                    if env_here != None:
-                        if env_here != env:
-                            to_elim.append(sym)
-                self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
+            if not already_seen:
+                # Crack Symmetry
+                if len(self.symmetries_possible) > 1:
+                    to_elim = []
+                    for sym in self.symmetries_possible:
+                        test = get_symmetric(t, self.map_width, self.map_height, sym)
+                        env_here = self.get_env(test)
+                        if env_here != None:
+                            if env_here != env:
+                                to_elim.append(sym)
+                    self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
         
         if self.flow_tracking:
             for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:

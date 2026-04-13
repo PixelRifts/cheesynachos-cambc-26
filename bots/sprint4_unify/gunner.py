@@ -7,7 +7,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 from helpers import DIRECTIONS
 
 # Priority map for targeting
-priorities = {
+PRIORITIES = {
     EntityType.BUILDER_BOT: 60,
     EntityType.CORE: 500,
     EntityType.GUNNER: 100,
@@ -41,13 +41,11 @@ class Gunner(Bot):
 
       step_x = get_step(my_pos.x, target_pos.x)
       step_y = get_step(my_pos.y, target_pos.y)
-      print("for "+ str(target_pos))
       dist = max(abs(target_pos.x - my_pos.x), abs(target_pos.y - my_pos.y))
       for i in range(1, dist): 
           check_x = my_pos.x + (i * step_x)
           check_y = my_pos.y + (i * step_y)
           p = Position(check_x, check_y)
-          print(check_x)
 
           bid = self.rc.get_tile_building_id(p)
           env = self.rc.get_tile_env(p)
@@ -72,11 +70,11 @@ class Gunner(Bot):
             current_tile_priority = -float('inf')
 
             if bb is not None and self.rc.get_team(bb) != self.rc.get_team():
-                current_tile_priority = priorities.get(EntityType.BUILDER_BOT, 0)
+                current_tile_priority = PRIORITIES.get(EntityType.BUILDER_BOT, 0)
 
             if e is not None and self.rc.get_team(e) != self.rc.get_team():
                 entt = self.rc.get_entity_type(e)
-                building_priority = priorities.get(entt, 0)
+                building_priority = PRIORITIES.get(entt, 0)
                 current_tile_priority = max(current_tile_priority, building_priority)
 
             # Update best if this tile is the new maximum and we can actually fire there
