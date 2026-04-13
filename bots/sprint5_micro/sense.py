@@ -191,8 +191,9 @@ class Sense:
             # Save Builder Bots
             bb = self.rc.get_tile_builder_bot_id(t)
             if bb is not None:
-                if self.rc.get_team(bb) == self.rc.get_team() and self.rc.get_id() != bb:
-                    self.ally_builders.add(t)
+                if self.rc.get_team(bb) == self.rc.get_team():
+                    if self.rc.get_id() != bb:
+                        self.ally_builders.add(t)
                 else:
                     self.enemy_builders.add(t)
 

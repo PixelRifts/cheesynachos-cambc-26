@@ -62,7 +62,7 @@ class Core(Bot):
             else: print("Enemy builder bot spotted!")
             self.spawn_healer()
         
-        target = 4 + turn // 50
+        target = 3 + turn // 50
         # if self.rc.get_current_round() > 50: target = 4 + turn // 80
         # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
         # target = 1

@@ -109,6 +109,8 @@ def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, e
     feed_dirs = []
     for d in CARDINAL_DIRECTIONS:
         p = poi.add(d)
+        if not is_in_map(p, sense.map_width, sense.map_height): continue
+        if not sense.is_seen(p): continue
         if sense.get_entity(p) == EntityType.HARVESTER or \
           (sense.get_entity(p) == EntityType.CONVEYOR and sense.get_direction(p) == d.opposite()) or \
           (sense.get_entity(p) == EntityType.SPLITTER and sense.get_direction(p) != d):
