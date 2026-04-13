@@ -438,6 +438,7 @@ class BuilderBot(Bot):
         # Validate Walls
         valid_count = 0
         turret_count = 0
+        should_turret = self.should_turret_heuristic()
         for d in CARDINAL_DIRECTIONS:
             adj = self.econ_target_ore.add(d)
 
@@ -461,7 +462,7 @@ class BuilderBot(Bot):
                 goto = self.econ_target_ore if ore_has in ENTITY_WALKABLE else adj.add(get_best_empty_adj(self.rc, adj, self.core_pos))
                 self.rc.draw_indicator_dot(goto, 255, 255, 0)
                 if try_destroy(self.rc, self.sense, goto, adj):
-                    if len(self.sense.enemy_builders) > 0 and turret_count < 1:
+                    if should_turret and turret_count < 1:
                         # _, _, the_turret, selected_entity_dir = micro.poi_attack_plan(self.rc, self.sense, adj)
                         selected_entity_dir = micro.compute_best_turret_dir(self.rc, self.sense, adj, EntityType.GUNNER)
                         if self.rc.can_build(EntityType.GUNNER, adj, selected_entity_dir):
@@ -1162,3 +1163,6 @@ class BuilderBot(Bot):
 
     def should_defence_station(self):
         return len(self.sense.ally_builders) < 5
+    
+    def should_turret_heuristic(self):
+        return len(self.sense.enemy_builders) > 0 or len(self.sense.enemy_infras) > 0
