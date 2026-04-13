@@ -88,7 +88,7 @@ def parse_ascii_tableid(text):
 
 
 
-command = ["cambc", "ladder", "--limit", "10"]
+command = ["cambc", "ladder", "--around"]
 env = os.environ.copy()
 env["COLUMNS"] = "1000"
 env["LINES"] = "100000"
@@ -106,13 +106,11 @@ for t in teas:
     output2 = run_cmd(cmds, env)
     team_id.append(parse_ascii_tableid(output2)[0]["team_id"])
 
-for i in range(1000):
-    for rank,team,tid in zip (ranks,teams,team_id):
+for i in range(200):
+    for rank,team,tid in zip(ranks, teams, team_id):
+        if team == TEAM: continue
         print(rank,team,tid)
-
-        if((rank<10 and i%3<30) or
-            (rank<15 and rank>=5 and i%3==10)):
-            command = ["cambc", "match", "unrated", tid]
-            output = run_cmd(command, env)
-            print(output)
-    sleep(60*5)
+        command = ["cambc", "match", "unrated", tid]
+        output = run_cmd(command, env)
+        print(output)
+    sleep(60*10)
