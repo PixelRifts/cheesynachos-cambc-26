@@ -30,13 +30,13 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int,
         p1 = poi.add(d)
         if not is_in_map(p1, sense.map_width, sense.map_height): continue
         if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE: score += 10
+        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1): score += 10
         if p1 in sense.enemy_builders: score += 10
         
         p2 = p1.add(d)
         if not is_in_map(p2, sense.map_width, sense.map_height): continue
         if sense.get_env(p2) == Environment.WALL: continue
-        if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE: score += 10
+        if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
         if p2 in sense.enemy_builders: score += 10
         
         if d not in CARDINAL_DIRECTIONS: continue
@@ -44,7 +44,7 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int,
         p3 = p2.add(d)
         if not is_in_map(p3, sense.map_width, sense.map_height): continue
         if sense.get_env(p3) == Environment.WALL: continue
-        if sense.get_entity(p3) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE: score += 10
+        if sense.get_entity(p3) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3): score += 10
         if p3 in sense.enemy_builders: score += 10
     
     return score, False
@@ -66,18 +66,18 @@ def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position) -> tuple[
             break
         
         p2 = p1.add(d)
-        if not is_in_map(p1, sense.map_width, sense.map_height): continue
-        if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2):
+        if not is_in_map(p2, sense.map_width, sense.map_height): continue
+        if sense.get_env(p2) == Environment.WALL: continue
+        if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2):
             selected_entity = EntityType.GUNNER
             break
 
         if d not in CARDINAL_DIRECTIONS: continue
         
         p3 = p2.add(d)
-        if not is_in_map(p1, sense.map_width, sense.map_height): continue
-        if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3):
+        if not is_in_map(p3, sense.map_width, sense.map_height): continue
+        if sense.get_env(p3) == Environment.WALL: continue
+        if sense.get_entity(p3) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3):
             selected_entity = EntityType.GUNNER
             break
 
