@@ -112,6 +112,7 @@ class BuilderBot(Bot):
         self.defence_is_to_core = False
         self.defence_current_target = None
         self.defence_use_fast = False
+        self.safe_patrol_count = 0
 
         # HEAL
         self.core_heal_target: Position = None
@@ -244,7 +245,7 @@ class BuilderBot(Bot):
             d = self.astar_test_heuristic(self.rc.get_position(), t, 6)
             hp = self.rc.get_hp(self.rc.get_tile_building_id(t))
             if d > 1: 
-                if hp > 9 and not_my_problem(t): continue
+                #if hp > 9 and not_my_problem(t): continue
                 d = d - 1 # exact number of turns to heal
             if d > to_heal_dist: continue
             if d == to_heal_dist and hp >= to_heal_hp: continue
@@ -536,7 +537,7 @@ class BuilderBot(Bot):
                 self.sense.config(flow_tracking=False)
                 return
 
-        if self.heal_turns == 0:
+        if 1 < self.heal_turns < 5:
             self.switch_state(BotState.ECON_EXPLORE)
             self.econ_explore_dir = biased_random_dir(self.rc)
             self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
@@ -589,34 +590,6 @@ class BuilderBot(Bot):
     # Healer
 
     def core_healer(self):
-        print("HELLLOOO")
-        to_heal = None
-        to_heal_dist = 100000
-        to_heal_hp = 100000
-        print('heal targets:', self.sense.heal_targets)
-        for t in self.sense.heal_targets:
-            if not self.rc.is_in_vision(t): continue
-            d = self.astar_test_heuristic(self.rc.get_position(), t, 6)
-            hp = self.rc.get_hp(self.rc.get_tile_building_id(t))
-            if d > 1: 
-                d = d - 1 # exact number of turns to heal
-            if d > to_heal_dist: continue
-            if d == to_heal_dist and hp >= to_heal_hp: continue
-            to_heal_dist = d
-            to_heal = t
-            to_heal_hp = hp
-        if to_heal is not None:
-            self.rc.draw_indicator_dot(to_heal, 0, 255, 0)
-            
-            if self.rc.get_position().distance_squared(to_heal) > GameConstants.ACTION_RADIUS_SQ:
-                pathfind.silly_pathfind_to(self.rc, to_heal)
-                print('[CORE]moving to heal target' + str(to_heal))
-                # no return - allow immediate heal
-
-            if self.rc.can_heal(to_heal):
-                self.rc.heal(to_heal)
-                # no return - allow checks
-
         pathfind.silly_pathfind_to(self.rc, self.core_pos)
 
         
