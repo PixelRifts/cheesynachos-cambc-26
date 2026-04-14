@@ -38,6 +38,7 @@ class BotState(Enum):
     DEFENCE_STATIONED    = "Def Stationed"
 
     CORE_HEALER = "Heal"
+    STALKER     = "Stalker"
 
     ATTACK_GOTO      = "Goto"
     ATTACK_BLOCK_ORE = "Block"
@@ -46,8 +47,8 @@ class BotState(Enum):
 
     RECOVER_GOTO_CORE = "Core"
 
-NO_STUCK_DETECTION_STATES =     { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
-MICRO_EXCLUDE_STATES =          { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+NO_STUCK_DETECTION_STATES =     { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.STALKER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+MICRO_EXCLUDE_STATES =          { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.STALKER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 HEAL_EXCLUDE_STATES  =          { BotState.ECON_CONNECT }
 ECON_STATES =                   { BotState.ECON_EXPLORE, BotState.ECON_TARGET, BotState.ECON_CONNECT, BotState.ECON_PLACE_FOUNDRY, BotState.ECON_NUKE }
 
@@ -122,6 +123,7 @@ class BuilderBot(Bot):
 
         # HEAL
         self.core_heal_target: Position = None
+        self.stalk_target: id = -1
 
         # ATTACK
         self.attack_target: Position = None
@@ -213,6 +215,8 @@ class BuilderBot(Bot):
             
             case BotState.CORE_HEALER:
                 self.core_healer()
+            case BotState.STALKER:
+                self.stalk_enemy_builder()
 
             case BotState.ATTACK_GOTO:
                 self.attack_goto()
@@ -628,11 +632,46 @@ class BuilderBot(Bot):
 
         pathfind.silly_pathfind_to(self.rc, self.defence_station)
 
+    def stalk_enemy_builder(self):
+        pos = None
+        for b in self.sense.enemy_builders:
+            if self.rc.get_tile_builder_bot_id(b) == self.stalk_target:
+                pos = b
+                break
+        
+        if pos is None: 
+            self.switch_state(BotState.CORE_HEALER)
+            return
+        if not self.is_bb_threat(pos):
+            self.switch_state(BotState.CORE_HEALER)
+
+        pathfind.silly_pathfind_to(self.rc, self.pos)
     # Healer
 
     def core_healer(self):
+        to_stalk = None
+        dist = 100000
+        for b in self.sense.enemy_builders:
+            if not self.is_bb_threat(b): continue
+            if b.distance_squared(self.core_pos) < dist:
+                to_stalk = self.rc.get_tile_builder_bot_id(b)
+                dist = b.distance_squared(self.core_pos)
+        if to_stalk is not None:
+            self.stalk_target = to_stalk
+            self.switch_state(BotState.STALKER)
+
         pathfind.silly_pathfind_to(self.rc, self.core_pos)
             
+    def is_bb_threat(self, pos: Position) -> bool:
+        if self.sense.is_allied(pos):  # pos itself allied = threat
+            return True
+        for d in CARDINAL_DIRECTIONS:
+            adj = pos.add(d)
+            if not self.rc.is_in_vision(adj): continue
+            if self.sense.is_allied(adj):
+                return True
+        return False
+    
     # Attack
 
     def attack_goto(self):
