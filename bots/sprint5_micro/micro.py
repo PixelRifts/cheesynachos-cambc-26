@@ -22,7 +22,7 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int,
     distance_index = min(chebyshev_distance(my_pos, poi), len(DISTANCE_SCORE_LUT) - 1)
     score += DISTANCE_SCORE_LUT[distance_index]
     
-    expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] * 2
+    expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
     if expected_hp_loss > rc.get_hp(): return 0, True
     score -= expected_hp_loss
     
