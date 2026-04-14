@@ -6,7 +6,7 @@ target_bot = "sprint5_micro"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint5_patrols"]
+opponents = ["sprint5_patrol"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.

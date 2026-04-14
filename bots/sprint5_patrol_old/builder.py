@@ -28,12 +28,10 @@ class BotState(Enum):
     ECON_EXPLORE = "Explore"
     ECON_TARGET  = "Target"
     ECON_CONNECT = "Connect"
-    ECON_PLACE_FOUNDRY = "Place Foundry"
     ECON_NUKE    = "Nuke"
 
     DEFENCE_TO_HARVESTER = "Def Harvester"
     DEFENCE_TO_CORE      = "Def Core"
-    DEFENCE_STATIONED    = "Def Stationed"
 
     CORE_HEALER = "Heal"
 
@@ -44,8 +42,8 @@ class BotState(Enum):
 
     RECOVER_GOTO_CORE = "Core"
 
-NO_STUCK_DETECTION_STATES = { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
-MICRO_EXCLUDE_STATES =      { BotState.ECON_CONNECT }
+NO_STUCK_DETECTION_STATES = { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN }
+HEAL_EXCLUDE_STATES =       { BotState.ECON_CONNECT }
 
 class BuilderBot(Bot):
     def __init__(self, rc: Controller):
@@ -111,10 +109,10 @@ class BuilderBot(Bot):
         self.econ_connect_past_pos = self.rc.get_position()
 
         # DEFENCE_LINE
-        self.defence_is_to_core: bool = False
-        self.defence_current_target: Position = None
-        self.defence_use_fast: bool = False
-        self.defence_station: Position = None
+        self.defence_is_to_core = False
+        self.defence_current_target = None
+        self.defence_use_fast = False
+        self.safe_patrol_count = 0
 
         # HEAL
         self.core_heal_target: Position = None
@@ -170,14 +168,8 @@ class BuilderBot(Bot):
         if self.rc.get_hp() < self.rc.get_max_hp():
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
-        elif self.state not in MICRO_EXCLUDE_STATES:
-            if len(self.sense.heal_targets) != 0:
-                self.meta_nearest_heal()
-                return
-            # else:
-            #     start = self.rc.get_cpu_time_elapsed()
-            #     self.meta_micro()
-            #     print('total micro time =', self.rc.get_cpu_time_elapsed()-start)
+        elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
+            self.meta_nearest_heal()
 
         match self.state:
             case BotState.ECON_EXPLORE:
@@ -189,8 +181,6 @@ class BuilderBot(Bot):
                     self.rc.draw_indicator_dot(self.pathfind_target, 255, 255, 255)
             case BotState.ECON_CONNECT:
                 self.econ_connect()
-            case BotState.ECON_PLACE_FOUNDRY:
-                self.econ_place_foundry()
             case BotState.ECON_NUKE:
                 self.econ_nuke()
             
@@ -202,8 +192,6 @@ class BuilderBot(Bot):
                 self.defence_to_core()
                 if self.defence_current_target is not None:
                     self.rc.draw_indicator_dot(self.defence_current_target, 255, 0, 255)
-            case BotState.DEFENCE_STATIONED:
-                self.defence_stationed()
             
             case BotState.CORE_HEALER:
                 self.core_healer()
@@ -230,86 +218,11 @@ class BuilderBot(Bot):
 
     # Meta
 
-    def meta_micro(self):
-        # Find enemies nearby
-        turrets = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.SENTINEL]] | \
-                  self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]] | \
-                  self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.LAUNCHER]] | \
-                  self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BREACH]]
-        enemy_turrets = [ t for t in turrets if not self.sense.is_allied(t) ]
-        
-        # TODO implement for anti builder bots as well
-        if len(enemy_turrets) == 0: return
-
-        to_remove = set()
-        for t in enemy_turrets:
-            for d in DIRECTIONS:
-                p1 = t.add(d)
-                if not is_in_map(p1, self.sense.map_width, self.sense.map_height): continue
-                if self.sense.get_env(p1) == Environment.WALL: continue
-                entt = self.sense.get_entity(p1)
-                dire = self.sense.get_direction(p1)
-                if self.sense.get_entity(p1) in ENTITY_TURRET and p1 in self.rc.get_attackable_tiles_from(t, dire, entt):
-                    to_remove.add(t)
-                    break
-                
-                p2 = p1.add(d)
-                if not is_in_map(p2, self.sense.map_width, self.sense.map_height): continue
-                if self.sense.get_env(p2) == Environment.WALL: continue
-                entt = self.sense.get_entity(p2)
-                dire = self.sense.get_direction(p2)
-                if self.sense.get_entity(p2) in ENTITY_TURRET and p2 in self.rc.get_attackable_tiles_from(t, dire, entt):
-                    to_remove.add(t)
-                    break
-                
-                if d not in CARDINAL_DIRECTIONS: continue
-                
-                p3 = p2.add(d)
-                if not is_in_map(p3, self.sense.map_width, self.sense.map_height): continue
-                if self.sense.get_env(p3) == Environment.WALL: continue
-                entt = self.sense.get_entity(p3)
-                dire = self.sense.get_direction(p3)
-                if self.sense.get_entity(p3) in ENTITY_TURRET and p3 in self.rc.get_attackable_tiles_from(t, dire, entt):
-                    to_remove.add(t)
-                    break
-        enemy_turrets = [ t for t in enemy_turrets if t not in to_remove ]
-
-        self.attack_poi_set.clear()
-        harvesters = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.HARVESTER]]
-        for h in harvesters:
-            for d in CARDINAL_DIRECTIONS:
-                p = h.add(d)
-                if p in self.attack_blacklist_set: continue
-                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-                if p in self.sense.transport_attack_blacklist: continue
-                if not self.rc.is_in_vision(p): continue
-                if not is_pos_turretable(self.rc, p): continue
-                self.attack_poi_set.add(p)
-        
-        best_poi = None
-        best_score = -10000000
-        for poi in self.attack_poi_set:
-            score, disable = micro.score_attack_poi(self.rc, self.sense, poi)
-            if disable: continue
-            if score > best_score:
-                best_score = score
-                best_poi = poi
-
-        if best_poi is not None:
-            target, frm, plan, dir = micro.poi_attack_plan(self.rc, self.sense, poi)
-            self.switch_state(BotState.ATTACK_EXEC_PLAN)
-            self.attack_target = target
-            self.attack_plan = plan
-            self.attack_plan_dir = dir
-            self.attack_from = frm
-            self.attack_return_to_econ = True
-            self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
-            return
-
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
         
         # def not_my_problem(pos: Position) -> bool:
+
         #     if self.rc.is_in_vision(pos):
         #         bb = self.rc.get_tile_builder_bot_id(pos)
         #         if bb is not None and bb != self.rc.get_id() and self.rc.get_team(bb) == self.rc.get_team():
@@ -318,6 +231,10 @@ class BuilderBot(Bot):
         #     for d in DIRECTIONS:
         #         adj = pos.add(d)
         #         if adj in self.sense.ally_builders:
+        #             for t in self.sense.heal_targets:
+        #                 if chebyshev_distance(adj, t) > 1: continue
+        #                 if self.rc.get_hp(self.rc.get_tile_building_id(t)) < self.rc.get_hp(self.rc.get_tile_building_id(pos)): return False # has an ally which is probably busy healing something else.
+
         #             return True
         #     return False # vulnerable building that needs healing
         
@@ -335,6 +252,7 @@ class BuilderBot(Bot):
             to_heal_dist = d
             to_heal = t
             to_heal_hp = hp
+
         
         if to_heal is not None:
             self.rc.draw_indicator_dot(to_heal, 0, 255, 0)
@@ -393,11 +311,6 @@ class BuilderBot(Bot):
                 if dist < closest_harvester_dist:
                     closest_harvester_dist = dist
                     closest_harvester = h
-            # if self.sense.is_allied(h):
-                # if self.should_defence_station():
-                #     self.switch_state(BotState.DEFENCE_STATIONED)
-                #     self.defence_station = h
-                #     return
         
         if closest_harvester is not None:
             self.switch_state(BotState.ATTACK_EXEC_PLAN)
@@ -415,7 +328,6 @@ class BuilderBot(Bot):
             self.attack_return_to_econ = True
             self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
             return
-
 
         # Timeout to switch direction after BOT_EXPLORE_TIMEOUT time
         self.econ_explore_timeout -= 1
@@ -452,8 +364,6 @@ class BuilderBot(Bot):
 
         # Validate Walls
         valid_count = 0
-        turret_count = 0
-        should_turret = self.should_turret_heuristic()
         for d in CARDINAL_DIRECTIONS:
             adj = self.econ_target_ore.add(d)
 
@@ -471,20 +381,12 @@ class BuilderBot(Bot):
             if env == Environment.WALL or \
                 (entt in ENTITY_VALID_BLOCKAGE_ANY) or \
                 (allied and entt in ENTITY_VALID_BLOCKAGE_FRIENDLY):
-                if allied and entt in ENTITY_TURRET: turret_count += 1
                 valid_count += 1
             else:
                 goto = self.econ_target_ore if ore_has in ENTITY_WALKABLE else adj.add(get_best_empty_adj(self.rc, adj, self.core_pos))
                 self.rc.draw_indicator_dot(goto, 255, 255, 0)
                 if try_destroy(self.rc, self.sense, goto, adj):
-                    if should_turret and turret_count < 1:
-                        # _, _, the_turret, selected_entity_dir = micro.poi_attack_plan(self.rc, self.sense, adj)
-                        selected_entity_dir = micro.compute_best_turret_dir(self.rc, self.sense, adj, EntityType.GUNNER)
-                        if self.rc.can_build(EntityType.GUNNER, adj, selected_entity_dir):
-                            self.rc.build(EntityType.GUNNER, adj, selected_entity_dir)
-                            valid_count += 1
-                            turret_count += 1
-                    elif self.rc.can_build_barrier(adj):
+                    if self.rc.can_build_barrier(adj):
                         self.rc.build_barrier(adj)
                         valid_count += 1
                 return
@@ -494,9 +396,6 @@ class BuilderBot(Bot):
         # Validate Position
         if self.rc.get_position() == self.econ_target_ore:
             move_dir = self.econ_target_ore.direction_to(self.pathfind_target)
-            if not self.rc.can_move(move_dir):
-                if self.sense.get_entity(self.pathfind_target) == EntityType.BARRIER and self.rc.can_destroy(self.pathfind_target):
-                    self.rc.destroy(self.pathfind_target)
             pathfind.simple_step(self.rc, move_dir)
         elif self.rc.get_position() != self.pathfind_target:
             return pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
@@ -526,8 +425,8 @@ class BuilderBot(Bot):
     def econ_connect(self):
         # Compute next target part
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
-            self.econ_connect_past_pos is None:
-            print('recompute', self.econ_connect_past_pos, self.econ_connect_current_target, self.econ_connect_saved_target)
+            self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
+            print('recompute')
             if self.econ_connect_current_is_final:
                 self.switch_to_possibly_patrol()
                 return
@@ -575,11 +474,10 @@ class BuilderBot(Bot):
                 if self.econ_target_is_ax:
                     target_pos = self.econ_connect_current_target
                     my_pos = self.rc.get_position()
-                    self.switch_state(BotState.ECON_PLACE_FOUNDRY)
+                    self.switch_state(BotState.ATTACK_EXEC_PLAN)
                     self.attack_target = target_pos
                     self.attack_feeder = None
                     self.attack_plan = EntityType.FOUNDRY
-                    print(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
                     self.attack_from = target_pos.add(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
                     self.attack_return_to_econ = True
                 else:
@@ -599,41 +497,6 @@ class BuilderBot(Bot):
     def econ_nuke(self):
         pass
 
-    def econ_place_foundry(self):
-        self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
-        self.rc.draw_indicator_dot(self.attack_from, 0, 255, 0)
-
-        print('basic pf')
-        if not self.rc.is_in_vision(self.attack_target):
-            pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
-            # pathfind.silly_pathfind_to(self.rc, self.attack_target)
-            if not self.rc.is_in_vision(self.attack_target): return
-        
-        entt = self.sense.get_entity(self.attack_target)
-        allied = self.sense.is_allied(self.attack_target)
-
-        print('uneditable check', self.attack_target)
-        if not is_pos_editable(self.rc, self.attack_target):
-            print(self.attack_target, 'is uneditable')
-            self.switch_back_to_neutral(self.attack_return_to_econ)
-            return
-
-        print('try destroy', self.attack_target)
-        if entt == self.attack_plan or (allied and entt in ENTITY_ATTACK_NOREPLACE):
-            self.switch_back_to_neutral(self.attack_return_to_econ)
-            return
-        if not try_destroy(self.rc, self.sense, self.attack_from, self.attack_target, \
-            ti_min=get_ti_cost(self.rc, self.attack_plan) + get_ti_cost(self.rc, EntityType.ROAD)): return
-
-        print('foundry setup', self.attack_target)
-        match self.attack_plan:
-            case EntityType.FOUNDRY:
-                if not self.rc.can_build_foundry(self.attack_target): return
-                self.rc.build_foundry(self.attack_target)
-
-        print('done', self.attack_target)
-        self.switch_back_to_neutral(self.attack_return_to_econ)
-
     # Defence
 
     def defence_to_harvester(self):
@@ -642,7 +505,12 @@ class BuilderBot(Bot):
             choices = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.SPLITTER]] | \
                       self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.CONVEYOR]] | \
                       self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BRIDGE]]
-            choices = [c for c in choices if c not in self.sense.ally_builders]
+            choices = [
+                c for c in choices
+                if c not in self.sense.ally_builders and 
+                self.sense.is_allied(c) and
+                self.rc.get_position().distance_squared(c) > 13
+            ]
             self.defence_current_target = None if len(choices) == 0 else random.choice(choices)
             if self.defence_current_target is None:
                 self.switch_state(BotState.ECON_EXPLORE)
@@ -652,22 +520,35 @@ class BuilderBot(Bot):
                 return
 
         self.defence_follow(self.sense.reverse_feed_graph, BotState.DEFENCE_TO_CORE)
-        pass
+        return
     
     def defence_to_core(self):
         # Init State
         if self.defence_current_target is None:
-            self.defence_current_target = random.choice(tuple(self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.CONVEYOR]]))
+            choices = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.SPLITTER]] | \
+                      self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.CONVEYOR]] | \
+                      self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.BRIDGE]]
+            choices = [
+                c for c in choices
+                if c not in self.sense.ally_builders and self.sense.is_allied(c)
+            ]
+            self.defence_current_target = None if len(choices) == 0 else random.choice(choices)
             if self.defence_current_target is None:
                 self.switch_state(BotState.ECON_EXPLORE)
                 self.econ_explore_dir = biased_random_dir(self.rc)
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 self.sense.config(flow_tracking=False)
                 return
-
-
+            
+        if self.heal_turns == 0:
+            self.switch_state(BotState.ECON_EXPLORE)
+            self.econ_explore_dir = biased_random_dir(self.rc)
+            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+            self.sense.config(flow_tracking=False)
+            return
+        
         self.defence_follow(self.sense.feed_graph, BotState.DEFENCE_TO_HARVESTER)
-        pass
+        return
     
     def defence_follow(self, graph, back_is: BotState):
         # Forward Current Target
@@ -690,6 +571,7 @@ class BuilderBot(Bot):
             
             if go_back and not changed:
                 starting_from = curr
+                self.heal_turns = 0
                 self.switch_state(back_is)
                 self.defence_current_target = starting_from
                 return
@@ -709,28 +591,12 @@ class BuilderBot(Bot):
             # else:
             pathfind.silly_pathfind_to(self.rc, self.defence_current_target)
 
-    def defence_stationed(self):
-        if len(self.sense.ally_builders) > 5:
-            self.switch_state(BotState.ECON_EXPLORE)
-            self.econ_explore_dir = biased_random_dir(self.rc)
-            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
-            return
-
-        # self.pathfind_target = self.defence_station
-        # should_astar = True
-        # if self.sense.is_seen(self.defence_station) and self.rc.is_in_vision(self.defence_station):
-        #     is_reachable = not self.astar_test_heuristic(self.rc.get_position(), self.defence_station, 6)
-        #     should_astar = is_reachable
-        
-        # if should_astar:
-        #     pathfind.fast_pathfind_to(self.rc, self.sense, self.defence_station)
-        # else:
-        pathfind.silly_pathfind_to(self.rc, self.defence_station)
-
     # Healer
 
     def core_healer(self):
         pathfind.silly_pathfind_to(self.rc, self.core_pos)
+
+        
             
     # Attack
 
@@ -741,7 +607,7 @@ class BuilderBot(Bot):
         self.pathfind_target = self.enemy_core_pos
         should_astar = True
         if self.sense.is_seen(self.enemy_core_pos) and self.rc.is_in_vision(self.enemy_core_pos):
-            is_reachable = not self.astar_test_heuristic(self.rc.get_position(), self.enemy_core_pos, 6)
+            is_reachable = is_reachable = self.astar_test_heuristic(self.rc.get_position(), self.enemy_core_pos, 6) <= 6
             # print(is_reachable)
             should_astar = is_reachable
         
@@ -750,18 +616,11 @@ class BuilderBot(Bot):
         else:
             pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
 
-        print('hi')
-
-        # Possibly eliminate symmetry
-        if self.sense.is_seen(self.enemy_core_pos):
-            if self.sense.get_entity(self.enemy_core_pos) != EntityType.CORE:
-                self.sense.eliminate_next_symmetry()
-
         self.attack_poi_set.clear()
+
         # Find econ crippling target
         harvesters = self.sense.entt_index[sense.ENTITY_TYPE_TO_VALUE[EntityType.HARVESTER]]
         for h in harvesters:
-            print(h, end='')
             if self.should_attack_harvester(h):
                 for d in CARDINAL_DIRECTIONS:
                     p = h.add(d)
@@ -770,7 +629,11 @@ class BuilderBot(Bot):
                     if not self.rc.is_in_vision(p): continue
                     if not is_pos_turretable(self.rc, p): continue
                     self.attack_poi_set.add(p)
-                    print(p)
+
+        # Possibly eliminate symmetry
+        if self.sense.is_seen(self.enemy_core_pos):
+            if self.sense.get_entity(self.pathfind_target) != EntityType.CORE:
+                self.sense.eliminate_next_symmetry()
 
         # Find suitable attack target
         if self.sense.enemy_core_found is not None:
@@ -789,8 +652,7 @@ class BuilderBot(Bot):
         best_poi = None
         best_score = -10000000
         for poi in self.attack_poi_set:
-            score, disable = micro.score_attack_poi(self.rc, self.sense, poi)
-            if disable: continue
+            score = micro.score_attack_poi(self.rc, self.sense, poi)
             if score > best_score:
                 best_score = score
                 best_poi = poi
@@ -814,42 +676,35 @@ class BuilderBot(Bot):
         self.rc.draw_indicator_dot(self.attack_from, 0, 255, 0)
 
         print('timeout check', self.attack_plan_timeout)
-        self.attack_plan_timeout -= 1
-        if self.attack_plan_timeout <= 0:
-            expiry = self.rc.get_current_round() + 100
-            self.attack_blacklist_queue.append((self.attack_target, expiry))
-            self.attack_blacklist_set.add(self.attack_target)
-            self.switch_back_to_neutral(self.attack_return_to_econ)
-            return
+        if self.attack_plan != EntityType.FOUNDRY:
+            self.attack_plan_timeout -= 1
+            if self.attack_plan_timeout <= 0:
+                expiry = self.rc.get_current_round() + 50
+                self.attack_blacklist_queue.append((self.attack_target, expiry))
+                self.attack_blacklist_set.add(self.attack_target)
+                self.switch_back_to_neutral(self.attack_return_to_econ)
+                return
         
         print('basic pf')
         if not self.rc.is_in_vision(self.attack_target):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
             # pathfind.silly_pathfind_to(self.rc, self.attack_target)
-            if not self.rc.is_in_vision(self.attack_target): return
-        
-        print('poi update check')
-        entt = self.sense.get_entity(self.attack_target)
-        allied = self.sense.is_allied(self.attack_target)
-        if not is_pos_turretable(self.rc, self.attack_target):
-            print(self.attack_target, 'stuff done here')
-            self.switch_back_to_neutral(self.attack_return_to_econ)
-            return
 
         print('uneditable check', self.attack_target)
-        if not is_pos_turretable(self.rc, self.attack_target) or self.attack_target in self.sense.ally_builders:
+        if self.rc.is_in_vision(self.attack_target) and \
+            not (is_pos_editable(self.rc, self.attack_target) if self.attack_plan == EntityType.FOUNDRY else is_pos_turretable(self.rc, self.attack_target)):
             print(self.attack_target, 'is uneditable')
             self.switch_back_to_neutral(self.attack_return_to_econ)
             return
 
         print('try destroy', self.attack_target)
+        entt = self.sense.get_entity(self.attack_target)
+        allied = self.sense.is_allied(self.attack_target)
         if entt == self.attack_plan or (allied and entt in ENTITY_ATTACK_NOREPLACE):
             self.switch_back_to_neutral(self.attack_return_to_econ)
             return
-
         if not try_destroy(self.rc, self.sense, self.attack_from, self.attack_target, \
-            ti_min=get_ti_cost(self.rc, self.attack_plan) + get_ti_cost(self.rc, EntityType.ROAD)):
-            return
+            ti_min=get_ti_cost(self.rc, self.attack_plan) + get_ti_cost(self.rc, EntityType.ROAD)): return
 
         print('attacker setup', self.attack_target)
         match self.attack_plan:
@@ -862,6 +717,9 @@ class BuilderBot(Bot):
             case EntityType.BARRIER:
                 if not self.rc.can_build_barrier(self.attack_target): return
                 self.rc.build_barrier(self.attack_target)
+            case EntityType.FOUNDRY:
+                if not self.rc.can_build_foundry(self.attack_target): return
+                self.rc.build_foundry(self.attack_target)
 
         print('done', self.attack_target)
         self.switch_back_to_neutral(self.attack_return_to_econ)
@@ -931,7 +789,7 @@ class BuilderBot(Bot):
         if bot_marked: return (False, Direction.CENTRE)
         if has_harvester and already_siphoned: return (False, already_siphoned_dir)
         tgt = get_best_placable_adj_ignorebb(self.rc, pos, self.core_pos)
-        if not has_harvester and already_siphoned and not is_ax: return (harvester_placable, already_siphoned_dir)
+        if not has_harvester and already_siphoned: return (harvester_placable, already_siphoned_dir)
         if has_harvester and not already_siphoned: return (not not_enough_info, tgt)
         if not has_harvester and not already_siphoned and harvester_placable: return (not not_enough_info, tgt)
 
@@ -942,20 +800,19 @@ class BuilderBot(Bot):
         target_tiles = self.core_tiles
         
         # Prioritize Target Tiles
-        if not is_ax:
-            best_final_target_dist = 100000000
-            best_final_target_tile: Position = None
-            filled_ct = []
-            for ct in target_tiles:
-                if start.distance_squared(ct) <= GameConstants.BRIDGE_TARGET_RADIUS_SQ:
-                    if not self.rc.is_in_vision(ct): continue
-                    d = start.distance_squared(ct)
-                    if d < best_final_target_dist:
-                        best_final_target_dist = d
-                        best_final_target_tile = ct
-            if best_final_target_tile is not None:
-                print('directly to target ', best_final_target_tile)
-                return (best_final_target_tile, True)
+        best_final_target_dist = 100000000
+        best_final_target_tile: Position = None
+        filled_ct = []
+        for ct in target_tiles:
+            if start.distance_squared(ct) <= GameConstants.BRIDGE_TARGET_RADIUS_SQ:
+                if not self.rc.is_in_vision(ct): continue
+                d = start.distance_squared(ct)
+                if d < best_final_target_dist:
+                    best_final_target_dist = d
+                    best_final_target_tile = ct
+        if best_final_target_tile is not None:
+            print('directly to target ', best_final_target_tile)
+            return (best_final_target_tile, True)
 
         # IF AXIONITE, PRIORITIZE MERGING USING FOUNDRY
         if is_ax:
@@ -1018,9 +875,9 @@ class BuilderBot(Bot):
             return (best, best_is_to_transport)
         return (None, False)
 
-    def astar_test_heuristic(self, start: Position, end: Position, cutoff: int) -> bool:
-        if start == end: return False
-        if chebyshev_distance(start, end) > cutoff: return True
+    def astar_test_heuristic(self, start: Position, end: Position, cutoff: int) -> int:
+        if start == end: return 0
+        if chebyshev_distance(start, end) > cutoff: return cutoff + 1
 
         h = chebyshev_distance
         heap = [(h(start, end), 0, start)]
@@ -1030,7 +887,7 @@ class BuilderBot(Bot):
             f, g, pos = heapq.heappop(heap)
             if g > cutoff: continue
 
-            if pos == end: return False
+            if pos == end: return g
             for d in DIRECTIONS:
                 nxt = pos.add(d)
                 ng = g + 1
@@ -1050,7 +907,7 @@ class BuilderBot(Bot):
 
                 visited[nxt] = ng
                 heapq.heappush(heap, (ng + h(nxt, end), ng, nxt))
-        return True
+        return cutoff + 1
 
     def should_bridge_heuristic(self, start: Position, end: Position, cutoff: int) -> bool:
         if start == end: return False
@@ -1128,7 +985,6 @@ class BuilderBot(Bot):
             bb = self.rc.get_tile_builder_bot_id(p)
             if bb is not None and self.rc.get_id() != bb:
                 if self.rc.get_team(bb) == self.rc.get_team():
-                    print('5')
                     return False
 
             entt = self.sense.get_entity(p)
@@ -1144,13 +1000,11 @@ class BuilderBot(Bot):
                     else:                           ally_gunners += 1
                 else:                               enemy_turrets += 1
             
-            if is_pos_turretable(self.rc, p) and entt not in ENTITY_VALID_BLOCKAGE_ANY:
+            if is_pos_editable(self.rc, p) and entt not in ENTITY_VALID_BLOCKAGE_ANY:
                 t[i] = True
                 has_free_side = True
         
-        print(has_free_side, not_enough_info)
         if not has_free_side or not_enough_info: return False
-        print(enemy_siphon, pos)
         return enemy_siphon or not self.sense.is_allied(pos)
 
     def switch_back_to_neutral(self, to_econ: bool):
@@ -1164,21 +1018,20 @@ class BuilderBot(Bot):
             self.pathfind_target = self.enemy_core_pos
 
     def switch_to_possibly_patrol(self):
-        patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)
+        patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5) <= 5
+        print('patrol condition ', patrol_condition)
         
-        if not patrol_condition:
-            self.switch_state(BotState.ECON_EXPLORE)
-            self.econ_explore_dir = biased_random_dir(self.rc)
-            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
-        else:
-            self.switch_state(BotState.DEFENCE_TO_HARVESTER)
-            self.sense.config(flow_tracking=True)
-            # self.econ_explore_dir = biased_random_dir(self.rc)
-            # self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+        # if not patrol_condition:
+        #     self.switch_state(BotState.ECON_EXPLORE)
+        #     self.econ_explore_dir = biased_random_dir(self.rc)
+        #     self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+        # else:
+        #     self.switch_state(BotState.DEFENCE_TO_HARVESTER)
+        #     self.sense.config(flow_tracking=True)
+        #     # self.econ_explore_dir = biased_random_dir(self.rc)
+        #     # self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+        self.switch_state(BotState.DEFENCE_TO_HARVESTER)
+        self.heal_turns = 0
+        self.sense.config(flow_tracking=True)
         return
-
-    def should_defence_station(self):
-        return len(self.sense.ally_builders) < 5
     
-    def should_turret_heuristic(self):
-        return len(self.sense.enemy_builders) > 0 or len(self.sense.enemy_infras) > 0

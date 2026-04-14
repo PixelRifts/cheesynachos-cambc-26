@@ -55,16 +55,28 @@ class Core(Bot):
     def turn(self):
         turn = self.rc.get_current_round()
 
+        # Clean up rescue ops that are no longer needed.
+        for b in list(self.active_rescue_ops):
+            if b not in self.rc.get_nearby_buildings():
+                self.active_rescue_ops.remove(b)
+            elif self.rc.get_hp(b) >= 13:
+                self.active_rescue_ops.remove(b)
+
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
-        if self.healer_needed() or (self.sees_enemy_builder_bot() and self.healer_count < 1):
-            if self.healer_needed(): print("Healer needed!")
-            else: print("Enemy builder bot spotted!")
+
+        if self.healer_needed():
+            print("Healer Needed!")
+            self.spawn_healer()
+
+        if (self.sees_enemy_builder_bot() and self.healer_count < 1):
+            print("Enemy Builder Bot Spotted!")
             self.spawn_healer()
         
-        target = 3 + turn // 40
-        if self.ti_tracker[-1] > (self.rc.get_builder_bot_cost()[0]*4): target = 3 + turn // 30
-
+        target = 4 + turn // 50
+        # if self.rc.get_current_round() > 50: target = 4 + turn // 80
+        # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
+        # target = 1
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:        
             if self.econ_count <= 2*self.rush_count:

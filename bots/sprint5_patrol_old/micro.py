@@ -10,45 +10,24 @@ from procedure import *
 
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants, ResourceType
 
-DISTANCE_SCORE_LUT = [ 30, 20, 15, 12, 10 ]
+DISTANCE_SCORE_LUT = [ 0, -10, -15, -18, -20 ]
 
-ENTITY_MICRO_USE_GUNNERS_TO_DISABLE = { EntityType.CORE } | ENTITY_TURRET
-
-def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int, bool):
+def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> int:
     my_pos = rc.get_position()
     score = 0
     
     # TODO: Change to A* path length
     distance_index = min(chebyshev_distance(my_pos, poi), len(DISTANCE_SCORE_LUT) - 1)
     score += DISTANCE_SCORE_LUT[distance_index]
-    
-    expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
-    if expected_hp_loss > rc.get_hp(): return 0, True
-    score -= expected_hp_loss
-    
-    for d in DIRECTIONS:
-        p1 = poi.add(d)
-        if not is_in_map(p1, sense.map_width, sense.map_height): continue
-        if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE: score += 10
-        if p1 in sense.enemy_builders: score += 10
-        
-        p2 = p1.add(d)
-        if not is_in_map(p2, sense.map_width, sense.map_height): continue
-        if sense.get_env(p2) == Environment.WALL: continue
-        if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE: score += 10
-        if p2 in sense.enemy_builders: score += 10
-        
-        if d not in CARDINAL_DIRECTIONS: continue
-        
-        p3 = p2.add(d)
-        if not is_in_map(p3, sense.map_width, sense.map_height): continue
-        if sense.get_env(p3) == Environment.WALL: continue
-        if sense.get_entity(p3) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE: score += 10
-        if p3 in sense.enemy_builders: score += 10
-    
-    return score, False
 
+    for d in DIRECTIONS:
+        p = poi.add(d)
+        if not is_in_map(p, sense.map_width, sense.map_height): continue
+        if sense.get_env(p) == Environment.WALL: continue
+        if sense.get_entity(p) not in ENTITY_TURRET: continue
+        score += 15
+    
+    return score
 
 def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position) -> tuple[Position, Position, EntityType, Direction]:
     my_pos = rc.get_position()
@@ -58,28 +37,12 @@ def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position) -> tuple[
     replace_from = target_pos.add(get_best_pathable_adj_with_diag(rc, target_pos, my_pos))
 
     for d in DIRECTIONS:
-        p1 = poi.add(d)
-        if not is_in_map(p1, sense.map_width, sense.map_height): continue
-        if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1):
-            selected_entity = EntityType.GUNNER
-            break
-        
-        p2 = p1.add(d)
-        if not is_in_map(p1, sense.map_width, sense.map_height): continue
-        if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2):
-            selected_entity = EntityType.GUNNER
-            break
-
-        if d not in CARDINAL_DIRECTIONS: continue
-        
-        p3 = p2.add(d)
-        if not is_in_map(p1, sense.map_width, sense.map_height): continue
-        if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3):
-            selected_entity = EntityType.GUNNER
-            break
+        p = poi.add(d)
+        if not is_in_map(p, sense.map_width, sense.map_height): continue
+        if sense.get_env(p) == Environment.WALL: continue
+        if sense.get_entity(p) in ENTITY_TURRET: continue
+        selected_entity = EntityType.GUNNER
+        break
 
     # When barriers are included here, uncomment this
     # if selected_entity in ENTITY_TURRET:
@@ -113,8 +76,6 @@ def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, e
     feed_dirs = []
     for d in CARDINAL_DIRECTIONS:
         p = poi.add(d)
-        if not is_in_map(p, sense.map_width, sense.map_height): continue
-        if not sense.is_seen(p): continue
         if sense.get_entity(p) == EntityType.HARVESTER or \
           (sense.get_entity(p) == EntityType.CONVEYOR and sense.get_direction(p) == d.opposite()) or \
           (sense.get_entity(p) == EntityType.SPLITTER and sense.get_direction(p) != d):
