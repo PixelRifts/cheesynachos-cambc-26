@@ -107,7 +107,7 @@ class ResultsAnalyzer:
             
             # Header
             writer.writerow(['Timestamp', 'ID', 'Bot1', 'Bot2', 'Map', 'Winner', 
-                           'Score_Bot1', 'Score_Bot2', 'Error', '', 'Command'])
+                           'Score_Bot1', 'Score_Bot2', 'Error', 'Command'])
             
             # Data rows
             for result in results:
@@ -121,7 +121,6 @@ class ResultsAnalyzer:
                     result.score[0],
                     result.score[1],
                     result.error or '',
-                    '',
                     "cambc run " + result.bot1 + " " + result.bot2 + " --watch maps/" + result.map_name + ".map26",
                 ])
         

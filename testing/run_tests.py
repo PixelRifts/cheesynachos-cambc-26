@@ -114,7 +114,8 @@ def main():
         else:
             test_maps = [m for m in raw_maps if m in maps]
             if not test_maps:
-                test_maps = maps
+                print("Invalid maps value")
+                return
 
         threads = int(test_cfg.get("threads", min(os.cpu_count() or 4, 8)))
         matches_per = int(test_cfg.get("matches_per", 1))
