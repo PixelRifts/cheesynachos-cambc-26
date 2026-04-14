@@ -56,6 +56,8 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position, ti_min:
             if rc.can_destroy(p) and ti >= ti_min:
                 print('destroying ', p, 'bcoz', ti, ti_min)
                 rc.destroy(p)
+            else:
+                print(ti, ti_min)
         else:
             print('walkable enemy', p)
             if rc.get_position() != p:
