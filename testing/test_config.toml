@@ -6,7 +6,7 @@ target_bot = "sprint5_micro"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint4_unify"]
+opponents = ["sprint5_patrols"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
@@ -15,7 +15,7 @@ opponents = ["sprint4_unify"]
 maps = ["all"]
 
 # Execution settings
-threads = 8
+threads = 12
 matches_per = 2
 seed = 1
 save_csv = true
