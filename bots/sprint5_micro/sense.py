@@ -74,6 +74,8 @@ class Sense:
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
         self.heal_targets: Set[Position] = set()
+        self.enemy_infras: Set[Position] = set()
+        self.nearest_enemy_infra: Position = None
         
         self.turret_cost_map = array('i', [0] * self.size)
     
@@ -133,6 +135,8 @@ class Sense:
         return self.map[self.idx(pos)] != 0
 
     def update(self):
+        my_pos = self.rc.get_position()
+
         for s in self.env_index.values():  s.clear()
         for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
@@ -140,6 +144,9 @@ class Sense:
         self.heal_targets.clear()
         
         self.transport_attack_blacklist.clear()
+        self.enemy_infras.clear()
+        self.nearest_enemy_infra = None
+        nearest_enemy_infra_dist = 10000000
         
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
@@ -148,6 +155,8 @@ class Sense:
                 self.remove_edges_from(t)
         
         for t in self.nearby_tiles:
+            already_seen = self.is_seen(t)
+            
             # Save Env and Buildings
             env = self.rc.get_tile_env(t)
             bldg = self.rc.get_tile_building_id(t)
@@ -174,6 +183,14 @@ class Sense:
             # Heal targets
             if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
                 self.heal_targets.add(t)
+            
+            # Enemy Infra
+            if not allied and entt in ENTITY_INFRASTRUCTURE:
+                self.enemy_infras.add(t)
+                d = t.distance_squared(my_pos)
+                if d < nearest_enemy_infra_dist:
+                    nearest_enemy_infra_dist = d
+                    self.nearest_enemy_infra = t
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
@@ -189,21 +206,23 @@ class Sense:
             # Save Builder Bots
             bb = self.rc.get_tile_builder_bot_id(t)
             if bb is not None:
-                if self.rc.get_team(bb) == self.rc.get_team() and self.rc.get_id() != bb:
-                    self.ally_builders.add(t)
+                if self.rc.get_team(bb) == self.rc.get_team():
+                    if self.rc.get_id() != bb:
+                        self.ally_builders.add(t)
                 else:
                     self.enemy_builders.add(t)
 
-            # Crack Symmetry
-            if len(self.symmetries_possible) > 1:
-                to_elim = []
-                for sym in self.symmetries_possible:
-                    test = get_symmetric(t, self.map_width, self.map_height, sym)
-                    env_here = self.get_env(test)
-                    if env_here != None:
-                        if env_here != env:
-                            to_elim.append(sym)
-                self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
+            if not already_seen:
+                # Crack Symmetry
+                if len(self.symmetries_possible) > 1:
+                    to_elim = []
+                    for sym in self.symmetries_possible:
+                        test = get_symmetric(t, self.map_width, self.map_height, sym)
+                        env_here = self.get_env(test)
+                        if env_here != None:
+                            if env_here != env:
+                                to_elim.append(sym)
+                    self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
         
         if self.flow_tracking:
             for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
