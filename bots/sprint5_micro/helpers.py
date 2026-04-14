@@ -316,10 +316,29 @@ def cardinal_direction_to(me: Position, other: Position) -> Direction:
     else:
         return Direction.SOUTH if dy > 0 else Direction.NORTH
 
-def biased_random_dir(rc: Controller) -> Direction:
+def is_near_center(pos, w, h):
+    cx, cy = w // 2, h // 2
+
+    # distance to center (chebyshev)
+    dc = max(abs(pos.x - cx), abs(pos.y - cy))
+
+    # distance to nearest edge
+    de = min(pos.x, pos.y, w - 1 - pos.x, h - 1 - pos.y)
+
+    # tune thresholds as needed
+    if dc <= min(w, h) // 6:
+        return True
+    if de <= min(w, h) // 6:
+        return False
+    return False
+
+def biased_random_dir(rc: Controller, core_pos: Position) -> Direction:
     c = random.randint(0, 10)
     if c < 3:
-        return rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
+        to_center = rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
+        if is_near_center(core_pos, rc.get_map_width(), rc.get_map_height()):
+            return to_center.opposite()
+        return to_center
     return random.choice(DIRECTIONS)
 
 def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> Position:

@@ -134,6 +134,7 @@ class Gunner(Bot):
                 return
             e = self.rc.get_tile_building_id(target)
             if e is not None and self.rc.get_team(e) == self.rc.get_team() and not (bb is not None and self.rc.get_team(bb) != self.rc.get_team()):
+                print('this condition')
                 return
             self.rc.fire(target)
 
