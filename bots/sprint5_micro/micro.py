@@ -50,7 +50,7 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int,
     return score, False
 
 
-def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position) -> tuple[Position, Position, EntityType, Direction]:
+def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position, enemy_core_pos: Position) -> tuple[Position, Position, EntityType, Direction]:
     my_pos = rc.get_position()
     target_pos = poi
     selected_entity = EntityType.SENTINEL
@@ -83,7 +83,7 @@ def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position) -> tuple[
 
     # When barriers are included here, uncomment this
     # if selected_entity in ENTITY_TURRET:
-    selected_entity_dir = compute_best_turret_dir(rc, sense, poi, selected_entity)
+    selected_entity_dir = compute_best_turret_dir(rc, sense, poi, selected_entity, enemy_core_pos)
 
     return target_pos, replace_from, selected_entity, selected_entity_dir
 
@@ -101,13 +101,13 @@ PRIORITIES = {
     EntityType.BRIDGE: 10,
     EntityType.HARVESTER: 0,
     EntityType.FOUNDRY: 100,
-    EntityType.ROAD: 1,
+    EntityType.ROAD: 0,
     EntityType.BARRIER: 1,
     EntityType.MARKER: 1,
 }
 
-def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, entt: EntityType) -> Direction:
-    max_dir = Direction.NORTH
+def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, entt: EntityType, enemy_core_pos: Position) -> Direction:
+    max_dir = None
     max_dir_score = -1000000
 
     feed_dirs = []
@@ -134,8 +134,11 @@ def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, e
                 if bb is not None:
                     score += PRIORITIES[EntityType.BUILDER_BOT] * (1 if rc.get_team(bb) == rc.get_team() else -1)
         
+        if score < 20: continue
         if score > max_dir_score:
             max_dir_score = score
             max_dir = d
+    if max_dir == None:
+        max_dir = poi.direction_to(enemy_core_pos)
     
     return max_dir

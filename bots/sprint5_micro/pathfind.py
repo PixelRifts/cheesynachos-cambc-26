@@ -290,7 +290,8 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         else:
             conveyor_dir = d.opposite()
 
-        if next_pos in sense.ally_builders: return # Wait a turn if blocked by a guy
+        bb = rc.get_tile_builder_bot_id(next_pos)
+        if bb is not None and rc.get_id() != bb: return # Wait a turn if blocked by a guy
         
         # Actually move
         moved = False

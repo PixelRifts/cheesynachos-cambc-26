@@ -2,6 +2,7 @@ from array import array
 
 from helpers import *
 
+from collections import deque
 from typing import Optional, Set, Dict
 from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
@@ -74,8 +75,10 @@ class Sense:
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
         self.heal_targets: Set[Position] = set()
-        self.enemy_infras: Set[Position] = set()
-        self.nearest_enemy_infra: Position = None
+        self.enemy_turrets: Set[Position] = set()
+        
+        self.ti_tracker = deque(maxlen=16)
+        self.ax_tracker = deque(maxlen=16)
         
         self.turret_cost_map = array('i', [0] * self.size)
     
@@ -134,8 +137,33 @@ class Sense:
     def is_seen(self, pos: Position):
         return self.map[self.idx(pos)] != 0
 
+    def ti_trend(self, alpha=0.3, cap=50):
+        if len(self.ti_tracker) < 2: return 0
+        ema = 0
+        prev = self.ti_tracker[0]
+        for x in self.ti_tracker:
+            d = x - prev
+            if d < -cap: d = -cap
+            if d > cap: d = cap
+            ema = alpha * d + (1 - alpha) * ema
+            prev = x
+        return ema
+
+    def ax_trend(self, alpha=0.3):
+        if len(self.ax_tracker) < 2: return 0
+        ema = 0
+        prev = self.ax_tracker[0]
+        for x in self.ax_tracker:
+            d = x - prev
+            ema = alpha * d + (1 - alpha) * ema
+            prev = x
+        return ema
+    
     def update(self):
         my_pos = self.rc.get_position()
+        ti, ax = self.rc.get_global_resources()
+        self.ti_tracker.append(ti)
+        self.ax_tracker.append(ax)
 
         for s in self.env_index.values():  s.clear()
         for s in self.entt_index.values(): s.clear()
@@ -144,9 +172,7 @@ class Sense:
         self.heal_targets.clear()
         
         self.transport_attack_blacklist.clear()
-        self.enemy_infras.clear()
-        self.nearest_enemy_infra = None
-        nearest_enemy_infra_dist = 10000000
+        self.enemy_turrets.clear()
         
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
@@ -185,12 +211,8 @@ class Sense:
                 self.heal_targets.add(t)
             
             # Enemy Infra
-            if not allied and entt in ENTITY_INFRASTRUCTURE:
-                self.enemy_infras.add(t)
-                d = t.distance_squared(my_pos)
-                if d < nearest_enemy_infra_dist:
-                    nearest_enemy_infra_dist = d
-                    self.nearest_enemy_infra = t
+            if not allied and entt in ENTITY_TURRET:
+                self.enemy_turrets.add(t)
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
@@ -286,8 +308,7 @@ class Sense:
         for t in tiles:
             if not is_in_map(t, self.map_width, self.map_height): continue
             self.turret_cost_map[self.idx(t)] += cost
-            self.rc.draw_indicator_dot(t, 0, 0, 255)
-
+            
     # Misc
 
     def eliminate_next_symmetry(self):

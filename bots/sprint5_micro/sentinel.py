@@ -4,7 +4,7 @@ import sys
 from enum import Enum
 from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
-from helpers import DIRECTIONS
+from helpers import *
 
 priorities = {
     EntityType.BUILDER_BOT: 60,
@@ -41,7 +41,9 @@ class Sentinel(Bot):
         for p in attackables:
             e = self.rc.get_tile_building_id(p)
             bb = self.rc.get_tile_builder_bot_id(p)
-
+            
+            valid = False
+            score = -chebyshev_distance(p, self.rc.get_position())
             if e is not None:
                 if bb is not None and self.rc.get_team(bb) == self.rc.get_team():
                     continue
@@ -53,19 +55,18 @@ class Sentinel(Bot):
                 if score < 0: continue
                 
                 score -= ((self.rc.get_hp(e) / self.attack_dmg) * 10)
+                valid = True
 
-                if score > priority and self.rc.can_fire(p):
-                    priority = score
-                    self.best_target = p
             if bb is not None:
                 if self.rc.get_team(bb) == self.rc.get_team():
                     continue
                 score =  priorities[EntityType.BUILDER_BOT]
                 score -= ((self.rc.get_hp(bb) / self.attack_dmg) * 10)
+                valid = True
                 
-                if score > priority and self.rc.can_fire(p):
-                    priority = score
-                    self.best_target = p
+            if valid and score > priority and self.rc.can_fire(p):
+                priority = score
+                self.best_target = p
 
         pass
 
