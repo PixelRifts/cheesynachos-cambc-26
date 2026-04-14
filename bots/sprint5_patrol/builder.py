@@ -664,7 +664,12 @@ class BuilderBot(Bot):
                 self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
                 self.sense.config(flow_tracking=False)
                 return
-
+        if self.heal_turns == 0:
+            self.switch_state(BotState.ECON_EXPLORE)
+            self.econ_explore_dir = biased_random_dir(self.rc)
+            self.pathfind_target = get_furthest_tile_in_dir(self.rc, self.rc.get_position(), self.econ_explore_dir)
+            self.sense.config(flow_tracking=False)
+            return
 
         self.defence_follow(self.sense.feed_graph, BotState.DEFENCE_TO_HARVESTER)
         pass
