@@ -288,7 +288,8 @@ class BuilderBot(Bot):
         best_poi = None
         best_score = -10000000
         for poi in self.attack_poi_set:
-            score = micro.score_attack_poi(self.rc, self.sense, poi)
+            score, disable = micro.score_attack_poi(self.rc, self.sense, poi)
+            if disable: continue
             if score > best_score:
                 best_score = score
                 best_poi = poi
@@ -774,7 +775,8 @@ class BuilderBot(Bot):
         best_poi = None
         best_score = -10000000
         for poi in self.attack_poi_set:
-            score = micro.score_attack_poi(self.rc, self.sense, poi)
+            score, disable = micro.score_attack_poi(self.rc, self.sense, poi)
+            if disable: continue
             if score > best_score:
                 best_score = score
                 best_poi = poi
@@ -915,7 +917,7 @@ class BuilderBot(Bot):
         if bot_marked: return (False, Direction.CENTRE)
         if has_harvester and already_siphoned: return (False, already_siphoned_dir)
         tgt = get_best_placable_adj_ignorebb(self.rc, pos, self.core_pos)
-        if not has_harvester and already_siphoned: return (harvester_placable, already_siphoned_dir)
+        if not has_harvester and already_siphoned and not is_ax: return (harvester_placable, already_siphoned_dir)
         if has_harvester and not already_siphoned: return (not not_enough_info, tgt)
         if not has_harvester and not already_siphoned and harvester_placable: return (not not_enough_info, tgt)
 

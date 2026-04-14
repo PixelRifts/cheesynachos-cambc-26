@@ -50,9 +50,9 @@ _VALUE_TO_DIRECTION = {v: k for k, v in DIRECTION_TO_VALUE.items()}
 
 TURRET_ATTACK_COSTS = {
     EntityType.GUNNER:   10,
-    EntityType.SENTINEL: 5,
-    EntityType.BREACH:   20,
-    EntityType.LAUNCHER: 5
+    EntityType.SENTINEL: 6,
+    EntityType.BREACH:   40,
+    EntityType.LAUNCHER: 10
 }
 
 class Sense:
