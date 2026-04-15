@@ -38,7 +38,6 @@ class BotState(Enum):
     DEFENCE_STATIONED    = "Def Stationed"
 
     CORE_HEALER = "Heal"
-    STALKER     = "Stalker"
 
     ATTACK_GOTO      = "Goto"
     ATTACK_BLOCK_ORE = "Block"
@@ -47,8 +46,8 @@ class BotState(Enum):
 
     RECOVER_GOTO_CORE = "Core"
 
-NO_STUCK_DETECTION_STATES =     { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.STALKER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
-MICRO_EXCLUDE_STATES =          { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.STALKER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+NO_STUCK_DETECTION_STATES =     { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+MICRO_EXCLUDE_STATES =          { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 HEAL_EXCLUDE_STATES  =          { BotState.ECON_CONNECT }
 ECON_STATES =                   { BotState.ECON_EXPLORE, BotState.ECON_TARGET, BotState.ECON_CONNECT, BotState.ECON_PLACE_FOUNDRY, BotState.ECON_NUKE }
 
@@ -103,6 +102,7 @@ class BuilderBot(Bot):
         self.econ_target_is_ax: bool = False
         
         # ECON_CONNECT
+        self.econ_connect_source_harvester: Position = None
         self.econ_connect_final_target: Position = None
         self.econ_connect_current_target: Position = None
         self.econ_connect_current_is_bridge: bool = False
@@ -215,8 +215,6 @@ class BuilderBot(Bot):
             
             case BotState.CORE_HEALER:
                 self.core_healer()
-            case BotState.STALKER:
-                self.stalk_enemy_builder()
 
             case BotState.ATTACK_GOTO:
                 self.attack_goto()
@@ -439,7 +437,9 @@ class BuilderBot(Bot):
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
             if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
                 is_ax = self.econ_target_is_ax
+                harvester_pos = self.econ_target_ore
                 self.switch_state(BotState.ECON_CONNECT)
+                self.econ_connect_source_harvester = harvester_pos
                 self.pathfind_target = self.core_pos
                 self.econ_target_is_ax = is_ax
 
@@ -629,37 +629,39 @@ class BuilderBot(Bot):
         if len(self.sense.ally_builders) > 5:
             self.switch_to_econ()
             return
-
-        pathfind.silly_pathfind_to(self.rc, self.defence_station)
-
-    def stalk_enemy_builder(self):
-        pos = None
-        for b in self.sense.enemy_builders:
-            if self.rc.get_tile_builder_bot_id(b) == self.stalk_target:
-                pos = b
-                break
         
-        if pos is None: 
-            self.switch_state(BotState.CORE_HEALER)
+        if self.rc.get_position() == self.defence_station and len(self.sense.enemy_builders) == 0:
+            self.switch_to_econ()
             return
-        if not self.is_bb_threat(pos):
-            self.switch_state(BotState.CORE_HEALER)
-
-        pathfind.silly_pathfind_to(self.rc, self.pos)
-    # Healer
-
-    def core_healer(self):
+        
         to_stalk = None
         dist = 100000
         for b in self.sense.enemy_builders:
             if not self.is_bb_threat(b): continue
-            if b.distance_squared(self.core_pos) < dist:
-                to_stalk = self.rc.get_tile_builder_bot_id(b)
-                dist = b.distance_squared(self.core_pos)
-        if to_stalk is not None:
-            self.stalk_target = to_stalk
-            self.switch_state(BotState.STALKER)
+            if b.distance_squared(self.defence_station) < dist:
+                to_stalk = b
+                dist = b.distance_squared(self.defence_station)
 
+        if to_stalk is not None:
+            print('stalking', to_stalk)
+            pathfind.silly_pathfind_to(self.rc, to_stalk)
+        
+        pathfind.fast_pathfind_to(self.rc, self.sense, self.defence_station)
+
+    # Healer
+    def core_healer(self):
+        # to_stalk = None
+        # dist = 100000
+        # for b in self.sense.enemy_builders:
+        #     if not self.is_bb_threat(b): continue
+        #     if b.distance_squared(self.core_pos) < dist:
+        #         to_stalk = b
+        #         dist = b.distance_squared(self.core_pos)
+        
+        # if to_stalk is not None:
+        #     print('stalking', to_stalk)
+        #     pathfind.silly_pathfind_to(self.rc, to_stalk)
+        
         pathfind.silly_pathfind_to(self.rc, self.core_pos)
             
     def is_bb_threat(self, pos: Position) -> bool:
@@ -1102,16 +1104,23 @@ class BuilderBot(Bot):
             self.pathfind_target = self.enemy_core_pos
 
     def switch_to_possibly_patrol(self):
-        # print('possiblypatrol before', self.rc.get_cpu_time_elapsed())
-        # patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)
-        patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
-        # print('possiblypatrol after', self.rc.get_cpu_time_elapsed())
-        if not patrol_condition:
-            self.switch_to_econ()
-        else:
-            self.switch_state(BotState.DEFENCE_TO_HARVESTER)
-            self.sense.config(flow_tracking=True)
-        return
+        # # print('possiblypatrol before', self.rc.get_cpu_time_elapsed())
+        # # patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)
+        # patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
+        # # print('possiblypatrol after', self.rc.get_cpu_time_elapsed())
+        # if not patrol_condition:
+        #     self.switch_to_econ()
+        # else:
+        #     self.switch_state(BotState.CORE_HEALER)
+        #     self.sense.config(flow_tracking=True)
+        # return
+        harvester_pos = self.econ_connect_source_harvester
+        self.switch_state(BotState.DEFENCE_STATIONED)
+        mid_x = (harvester_pos.x + self.core_pos.x) // 2
+        mid_y = (harvester_pos.y + self.core_pos.y) // 2
+        self.defence_station = Position(mid_x, mid_y)
+
+
 
     def switch_to_econ(self):
         self.switch_state(BotState.ECON_EXPLORE)

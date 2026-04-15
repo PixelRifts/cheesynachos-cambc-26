@@ -57,7 +57,11 @@ class Core(Bot):
 
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
-        if self.healer_needed() or (self.sees_enemy_builder_bot() and self.healer_count < 1):
+        if self.healer_count < 1:
+            if self.sees_enemy_builder_bot() or self.sees_conveyor_belt():
+                print("Enemy builder / converyor belt spotted!")
+                self.spawn_healer()
+        elif self.healer_needed():
             if self.healer_needed(): print("Healer needed!")
             else: print("Enemy builder bot spotted!")
             self.spawn_healer()
@@ -95,10 +99,14 @@ class Core(Bot):
         return False
 
     def spawn_healer(self):
+        print("Spawning healer bot!")
         spawn_pos = self.rc.get_position()
+        print("builderbot cost", self.rc.get_builder_bot_cost())
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
             self.healer_count += 1
+        else:
+            print("Failed to spawn healer bot!")
 
     def healer_needed(self) -> bool:
         for bldg in self.rc.get_nearby_buildings():
@@ -109,25 +117,10 @@ class Core(Bot):
 
             # bldg_pos = self.rc.get_position(bldg)
             hp = self.rc.get_hp(bldg)
-
-            # Effective HP logic - Didnt Work.
-            # effective_hp = hp
-            # if self.rc.is_in_vision(bldg_pos):
-            #     bb_here = self.rc.get_tile_builder_bot_id(bldg_pos)
-            #     if bb_here is not None and self.rc.get_team(bb_here) == self.rc.get_team():
-            #         effective_hp += 4
-            # for d in DIRECTIONS:
-            #     adj = bldg_pos.add(d)
-            #     if not self.rc.is_in_vision(adj):
-            #         continue
-            #     bb = self.rc.get_tile_builder_bot_id(adj)
-            #     if bb is None:
-            #         continue
-            #     if self.rc.get_team(bb) == self.rc.get_team():
-            #         effective_hp += 4
-
+            
             hp_threshold = 9 if bldg in self.active_rescue_ops else 13  # DONOT CHANGE !!!
             if hp < hp_threshold:
+                print(f"Building {bldg} needs healing!")
                 self.mark_rescue_operation(bldg)
                 return True
 
@@ -144,6 +137,14 @@ class Core(Bot):
             if self.rc.get_team(bb) != self.rc.get_team():
                 return True
 
+        return False
+    
+    def sees_conveyor_belt(self):
+        for bldg in self.rc.get_nearby_buildings():
+            if self.rc.get_team(bldg) != self.rc.get_team():
+                continue
+            if self.rc.get_entity_type(bldg) == EntityType.CONVEYOR:
+                return True
         return False
 
     def end_turn(self):
