@@ -19,26 +19,27 @@ class Launcher(Bot):
         #         self.type = Defence.CORELAUNCHER
         #         break
 
-        my_pos = rc.get_position()
-        self.inactivity_counter = 0
-        self.fading = False
-        protecting_harvester = False
-        for d in DIRECTIONS:
-            p = my_pos.add(d)
-            if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
-            bldg = rc.get_tile_building_id(p)
-            entt = None if bldg is None else rc.get_entity_type(bldg)
-            allied = False if bldg is None else rc.get_team(bldg) == rc.get_team()
-            if entt in ENTITY_TRANSPORT and allied:
-                self.fading = True
+        # my_pos = rc.get_position()
+        # self.inactivity_counter = 0
+        # self.fading = False
+        # protecting_harvester = False
+        # for d in DIRECTIONS:
+        #     p = my_pos.add(d)
+        #     if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        #     bldg = rc.get_tile_building_id(p)
+        #     entt = None if bldg is None else rc.get_entity_type(bldg)
+        #     allied = False if bldg is None else rc.get_team(bldg) == rc.get_team()
+        #     if entt in ENTITY_TRANSPORT and allied:
+        #         self.fading = True
             
 
     def start_turn(self):
         # TODO: senses update
-        self.inactivity_counter += 1
-        ti, ax = self.rc.get_global_resources()
-        if self.fading and self.inactivity_counter > LAUNCHER_INACTIVITY_DELETION and ti < TI_DANGEROUSLY_LOW_THRESHOLD:
-            self.rc.self_destruct()
+        # self.inactivity_counter += 1
+        # ti, ax = self.rc.get_global_resources()
+        # if self.fading and self.inactivity_counter > LAUNCHER_INACTIVITY_DELETION and ti < TI_DANGEROUSLY_LOW_THRESHOLD:
+        #     self.rc.self_destruct()
+        pass
 
     def turn(self):
         allied_positions = []
