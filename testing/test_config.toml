@@ -2,17 +2,17 @@
 
 # Bot to evaluate
 target_bot = "sprint5_unify_evolved"
-# target_bot = "sprint3_core"
+# target_bot = "sprint5_unify_evolved"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint4_unify"]
+opponents = ["sprint5_unify_mega_evolved"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
 # Use "sample10", "sample20", "sample30" or "sample40" to sample a random set of 10/20/30/40 maps
 # maps = ["all"]
-maps = ["all"]
+maps = ["sample20"]
 
 # Execution settings
 threads = 12
