@@ -116,6 +116,17 @@ def is_pos_editable(rc: Controller, pos: Position) -> bool:
     allied = rc.get_team() == rc.get_team(bldg)
     return allied
 
+def is_pos_quickly_turretable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    allied = rc.get_team() == rc.get_team(bldg)
+    entt = rc.get_entity_type(bldg)
+    return allied and entt in ENTITY_TURRET_REPLACABLE
+
+
 def is_pos_turretable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return True
     env = rc.get_tile_env(pos)

@@ -66,18 +66,20 @@ class Sense:
         self.nearby_tiles = []
 
         self.map = array('H', [0] * self.size)
-        self.env_index: Dict[int, Set[Position]] = {v: set() for v in ENVIRONMENT_TO_VALUE.values()}
-        self.entt_index: Dict[int, Set[Position]] = {v: set() for v in ENTITY_TYPE_TO_VALUE.values()}
         self.ally_builders:  Set[Position] = set()
         self.enemy_builders: Set[Position] = set()
         self.transport_attack_blacklist: Set[Position] = set()
         self.feed_graph: Dict[Position, Set[Position]] = {}
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
+
         self.heal_targets: Set[Position] = set()
         self.enemy_turrets: Set[Position] = set()
+        self.ally_turrets: Set[Position] = set()
         self.enemy_transports: Set[Position] = set()
         self.ally_transports: Set[Position] = set()
+        self.ores: Set[Position] = set()
+        self.harvesters: Set[Position] = set()
         
         self.ti_tracker = deque(maxlen=16)
         self.ax_tracker = deque(maxlen=16)
@@ -101,7 +103,6 @@ class Sense:
     def set_env(self, p: Position, env: Environment):
         i = self.idx(p)
         env_id = ENVIRONMENT_TO_VALUE[env]
-        self.env_index[env_id].add(p)
         self.map[i] = (env_id << 13) | (self.map[i] & 0x1FFF)
         
     def set_entt(self, p: Position, dir: Direction, entity: EntityType, allied: bool):
@@ -109,8 +110,7 @@ class Sense:
         
         entt_type_id = ENTITY_TYPE_TO_VALUE[entity]
         dir_id = DIRECTION_TO_VALUE[dir]
-        self.entt_index[entt_type_id].add(p)
-
+        
         self.map[i] = (self.map[i] & 0xE000) | (entt_type_id << 5) | (dir_id << 1) | allied
 
     def set_entt_and_env(self, p: Position, dir: Direction, entity: EntityType, env: Environment, allied: bool):
@@ -119,9 +119,7 @@ class Sense:
         entt_type_id = ENTITY_TYPE_TO_VALUE[entity]
         env_id = ENVIRONMENT_TO_VALUE[env]
         dir_id = DIRECTION_TO_VALUE[dir]
-        self.entt_index[entt_type_id].add(p)
-        self.env_index[env_id].add(p)
-
+        
         self.map[i] = (env_id << 13) | (entt_type_id << 5) | (dir_id << 1) | allied
 
     def get_env(self, p: Position):
@@ -167,16 +165,17 @@ class Sense:
         self.ti_tracker.append(ti)
         self.ax_tracker.append(ax)
 
-        for s in self.env_index.values():  s.clear()
-        for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
         self.enemy_builders.clear()
         self.heal_targets.clear()
         
         self.transport_attack_blacklist.clear()
         self.enemy_turrets.clear()
+        self.ally_turrets.clear()
         self.enemy_transports.clear()
         self.ally_transports.clear()
+        self.ores.clear()
+        self.harvesters.clear()
         
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
@@ -195,34 +194,48 @@ class Sense:
             dir = self.rc.get_direction(bldg) if entt in ENTITY_DIRECTIONAL else Direction.CENTRE
 
             # Compare with old if turret and update costs
-            old_entt = self.get_entity(t)
-            old_dir = self.get_direction(t)
-            old_allied = self.is_allied(t)
-            if (old_entt in ENTITY_TURRET or entt in ENTITY_TURRET) and\
-                (old_entt != entt or old_dir != dir) and\
-                (not old_allied or not allied):
-                if old_entt in ENTITY_TURRET and not old_allied:
-                    self.add_turret_attack_costs(t, old_entt, old_dir, -1)
-                if entt in ENTITY_TURRET and not allied:
-                    self.add_turret_attack_costs(t, entt, dir, 1)
-                    # print(self.turret_cost_map, file=sys.stderr)
+            if already_seen:
+                old_entt = self.get_entity(t)
+                old_dir = self.get_direction(t)
+                old_allied = self.is_allied(t)
 
-            # Commit information about tile
-            self.set_entt_and_env(t, dir, entt, env, allied)
+                if (old_entt in ENTITY_TURRET or entt in ENTITY_TURRET) and\
+                    (old_entt != entt or old_dir != dir) and\
+                    (not old_allied or not allied):
+                    if old_entt in ENTITY_TURRET and not old_allied:
+                        self.add_turret_attack_costs(t, old_entt, old_dir, -1)
+                    if entt in ENTITY_TURRET and not allied:
+                        self.add_turret_attack_costs(t, entt, dir, 1)
+                        # print(self.turret_cost_map, file=sys.stderr)
+                
+                if old_entt != entt or old_dir != dir or old_allied != allied:
+                    self.set_entt_and_env(t, dir, entt, env, allied)
+            else:
+                # Commit information about tile
+                self.set_entt_and_env(t, dir, entt, env, allied)
 
             # Heal targets
             if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
                 self.heal_targets.add(t)
             
-            # Enemy Infra
+            # Env
+            if env in ENVIRONMENT_ORE:
+                self.ores.add(t)
+            
+            # Infra
             if not allied:
                 if entt in ENTITY_TURRET:
                     self.enemy_turrets.add(t)
-                if entt in ENTITY_TRANSPORT:
+                elif entt in ENTITY_TRANSPORT:
                     self.enemy_transports.add(t)
             else:
-                if entt in ENTITY_TRANSPORT:
+                if entt in ENTITY_TURRET:
+                    self.ally_turrets.add(t)
+                elif entt in ENTITY_TRANSPORT:
                     self.ally_transports.add(t)
+            
+            if entt == EntityType.HARVESTER:
+                self.harvesters.add(t)
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
@@ -257,13 +270,10 @@ class Sense:
                     self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
         
         if self.flow_tracking:
-            for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
-                if self.is_allied(u):
+            for u in self.ally_turrets:
+                if self.is_allied(u) and self.get_entity(u) != EntityType.LAUNCHER:
                     self.transport_attack_blacklist.update(self.get_feeders_of(u))
-            for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.SENTINEL]]:
-                if self.is_allied(u):
-                    self.transport_attack_blacklist.update(self.get_feeders_of(u))
-
+            
     # Feed Graph stuff
 
     def add_edge(self, src: Position, dst: Position):

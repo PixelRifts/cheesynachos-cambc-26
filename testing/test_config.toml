@@ -1,12 +1,12 @@
 # Test runner config for testing/run_tests.py
 
 # Bot to evaluate
-target_bot = "sprint5_micro"
+target_bot = "sprint5_unify_evolved"
 # target_bot = "sprint3_core"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint5_patrol"]
+opponents = ["sprint4_unify"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
