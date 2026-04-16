@@ -31,7 +31,12 @@ ENTITY_INVALID_ATTACK_FRIENDLY = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENT
 
 RESOURCE_ALLOWED_AMMO = { ResourceType.TITANIUM, ResourceType.REFINED_AXIONITE }
 ENVIRONMENT_ORE = { Environment.ORE_AXIONITE, Environment.ORE_TITANIUM }
-    
+
+POSITION_GLOBAL_CACHE: list[Position] = [
+    Position(i % MAX_MAP_WIDTH, i // MAX_MAP_WIDTH) for i in range(MAX_MAP_SIZE)
+]
+POSITION_CACHE: list[Position] = []
+
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
 
@@ -105,7 +110,7 @@ def is_pos_conveyorable(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     allied = rc.get_team() == rc.get_team(bldg)
     entt = rc.get_entity_type(bldg)
-    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL)
+    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL) or (allied and entt == EntityType.BARRIER)
 
 def is_pos_editable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return True
@@ -397,3 +402,7 @@ def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> P
     if math.isinf(steps): return pos
     return Position(pos.x + dx * steps, pos.y + dy * steps)
 
+def fast_is_in_vision(w: int, me: int, t: int):
+    dx = (tile_idx % w)  - (player_idx % w)
+    dy = (tile_idx // w) - (player_idx // w)
+    return (dx*dx + dy*dy) <= 20

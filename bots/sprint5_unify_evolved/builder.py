@@ -3,6 +3,7 @@ import sense
 import pathfind
 import random
 import heapq
+import micro
 
 from bot import Bot
 from helpers import *
@@ -167,7 +168,6 @@ class BuilderBot(Bot):
                 self.stuck_counter = 0
                 self.stuck_pos = self.rc.get_position()
         
-        print(len(self.sense.heal_targets) != 0)
         if self.rc.get_hp() < self.rc.get_max_hp():
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
@@ -280,47 +280,29 @@ class BuilderBot(Bot):
         
         to_heal = None
         to_heal_dist = 100000
-        to_heal_secondary = None
-        to_heal_secondary_dist = 100000
-        to_heal_is_must = False
-
         for t in self.sense.heal_targets:
             d = self.rc.get_position().distance_squared(t)
-
             if d < to_heal_dist:
-                to_heal_secondary = to_heal
-                to_heal_secondary_dist = to_heal_dist
                 to_heal_dist = d
                 to_heal = t
-            elif d < to_heal_secondary_dist:
-                to_heal_secondary_dist = d
-                to_heal_secondary = t
         
         if to_heal is not None:
-            self.rc.draw_indicator_dot(to_heal, 0, 255, 0)
             moved = False
+            self.rc.draw_indicator_dot(to_heal, 0, 255, 0)
 
+            my_pos = self.rc.get_position()
+            
             if self.rc.get_position().distance_squared(to_heal) > GameConstants.ACTION_RADIUS_SQ:
-                pathfind.silly_pathfind_to(self.rc, to_heal.add(get_best_pathable_adj_with_diag(self.rc, to_heal, self.core_pos)))
-                moved = True
+                pathfind.silly_pathfind_to(self.rc, to_heal)
+                
+                if self.rc.get_position() != my_pos:
+                    moved = True
+                # no return - allow immediate heal
 
-            # heal primary
             if self.rc.can_heal(to_heal):
                 self.rc.heal(to_heal)
+                # no return - allow checks
 
-            # heal secondary if in range
-            if to_heal_secondary is not None:
-                if self.rc.can_heal(to_heal_secondary):
-                    self.rc.heal(to_heal_secondary)
-                
-                # if we didn't move for primary, reposition toward secondary
-                elif not moved:
-                    sec_dist = self.rc.get_position().distance_squared(to_heal_secondary)
-                    if sec_dist > GameConstants.ACTION_RADIUS_SQ:
-                        pathfind.silly_pathfind_to(self.rc, to_heal_secondary.add(
-                            get_best_pathable_adj_with_diag(self.rc, to_heal_secondary, self.core_pos)
-                        ))
-            
             my_pos = self.rc.get_position()
             has_enemy_targeting = False
             launcher_candidate = None
@@ -337,9 +319,7 @@ class BuilderBot(Bot):
                     self.rc.destroy(launcher_candidate)
                 if self.rc.can_build_launcher(launcher_candidate):
                     self.rc.build_launcher(launcher_candidate)
-            
             return moved
-        return False
 
     # Econ
 
@@ -349,7 +329,6 @@ class BuilderBot(Bot):
         # Takeover logic
         budget = min(1300, self.rc.get_cpu_time_elapsed() + 100)
         for b in self.sense.ally_bridges:
-            print(b)
             if not self.rc.is_in_vision(b): continue
             bldg = self.rc.get_tile_building_id(b)
             resource = self.rc.get_stored_resource(bldg)
@@ -359,7 +338,6 @@ class BuilderBot(Bot):
             allied = self.sense.is_allied(tgt)
             entt = self.sense.get_entity(tgt)
             if self.sense.is_seen(tgt) and not (allied and entt in ENTITY_INFRASTRUCTURE):
-                print(b)
                 if pathfind.fast_pathfind_to(self.rc, self.sense, tgt):
                     is_ax = resource == ResourceType.RAW_AXIONITE
                     self.switch_state(BotState.ECON_CONNECT)
@@ -439,12 +417,14 @@ class BuilderBot(Bot):
         
     def econ_target(self):
         # Make sure there aren't new developments concerning the ore
+        # print('confirm status')
         should_connect, direction = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax)
         if not should_connect or direction == Direction.CENTRE:
             self.switch_to_econ()
             return
         self.pathfind_target = self.econ_target_ore.add(direction)
-        
+
+        # print('seencheck')
         if not self.sense.is_seen(self.econ_target_ore):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
             if pathfind.pf_state.failed:
@@ -455,15 +435,16 @@ class BuilderBot(Bot):
 
         # Validate Walls
         valid_count = 0
+        should_turret = len(self.sense.enemy_transports) > 4 or len(self.sense.enemy_builders) > 2 or self.sense.ti_tracker[-1] > 500
+        the_entt_to_use = EntityType.SENTINEL if should_turret else EntityType.BARRIER
         for d in self.shuffled_cardinal_directions:
             adj = self.econ_target_ore.add(d)
 
             if adj == self.pathfind_target: continue
-            if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()):
+            if not is_in_map(adj, self.sense.map_width, self.sense.map_height):
                 valid_count += 1
                 continue
-            if not self.rc.is_in_vision(adj): continue
-            # print('wall ', d, adj)
+            # if not self.rc.is_in_vision(adj): continue
 
             entt = self.sense.get_entity(adj)
             allied = self.sense.is_allied(adj)
@@ -472,15 +453,17 @@ class BuilderBot(Bot):
             if env == Environment.WALL or \
                 (entt in ENTITY_VALID_BLOCKAGE_ANY) or \
                 (allied and entt in ENTITY_VALID_BLOCKAGE_FRIENDLY):
+                if allied and entt == EntityType.SENTINEL: the_entt_to_use = EntityType.BARRIER
                 valid_count += 1
             else:
                 goto = self.econ_target_ore if ore_has in ENTITY_WALKABLE else adj.add(get_best_empty_adj(self.rc, adj, self.core_pos))
-                if try_destroy(self.rc, self.sense, goto, adj, ti_min=get_ti_cost(self.rc, EntityType.BARRIER)):
-                    if self.rc.can_build_barrier(adj):
-                        self.rc.build_barrier(adj)
+                
+                if try_destroy(self.rc, self.sense, goto, adj, ti_min=get_ti_cost(self.rc, the_entt_to_use)):
+                    dir = micro.compute_best_turret_dir(self.rc, self.sense, adj, the_entt_to_use, self.enemy_core_pos) if the_entt_to_use != EntityType.BARRIER else None
+                    if self.rc.can_build(the_entt_to_use, adj, dir):
+                        self.rc.build(the_entt_to_use, adj, dir)
                         valid_count += 1
         
-        # print('after wall checks valid=', valid_count)
         if valid_count != 3: return
         # Validate Position
         if self.rc.get_position() == self.econ_target_ore:
@@ -825,7 +808,7 @@ class BuilderBot(Bot):
         # self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
         # self.rc.draw_indicator_dot(self.attack_from, 0, 255, 0)
 
-        print('timeout check', self.attack_plan_timeout, self.rc.get_cpu_time_elapsed())
+        # print('timeout check', self.attack_plan_timeout, self.rc.get_cpu_time_elapsed())
         self.attack_plan_timeout -= 1
         if self.attack_plan_timeout <= 0:
             expiry = self.rc.get_current_round() + 100
@@ -834,7 +817,7 @@ class BuilderBot(Bot):
             self.switch_back_to_neutral(self.attack_return_to_econ, self.attack_return_to_heal)
             return
         
-        print('basic pf')
+        # print('basic pf')
         if not self.rc.is_in_vision(self.attack_target):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
             # pathfind.silly_pathfind_to(self.rc, self.attack_target)
@@ -859,7 +842,7 @@ class BuilderBot(Bot):
                 self.rc.build_launcher(launcher_candidate)
             return
 
-        print('poi update check')
+        # print('poi update check')
         entt = self.sense.get_entity(self.attack_target)
         allied = self.sense.is_allied(self.attack_target)
         if not is_pos_turretable(self.rc, self.attack_target):
@@ -870,13 +853,13 @@ class BuilderBot(Bot):
             self.switch_back_to_neutral(self.attack_return_to_econ, self.attack_return_to_heal)
             return
 
-        print('uneditable check', self.attack_target, self.rc.get_cpu_time_elapsed())
+        # print('uneditable check', self.attack_target, self.rc.get_cpu_time_elapsed())
         if not is_pos_turretable(self.rc, self.attack_target) or self.attack_target in self.sense.ally_builders:
             # print(self.attack_target, 'is uneditable')
             self.switch_back_to_neutral(self.attack_return_to_econ, self.attack_return_to_heal)
             return
 
-        print('try destroy', self.attack_target, self.rc.get_cpu_time_elapsed())
+        # print('try destroy', self.attack_target, self.rc.get_cpu_time_elapsed())
         if entt == self.attack_plan or (allied and entt in ENTITY_ATTACK_NOREPLACE):
             self.switch_back_to_neutral(self.attack_return_to_econ, self.attack_return_to_heal)
             return
@@ -887,7 +870,7 @@ class BuilderBot(Bot):
             print(get_ti_cost(self.rc, self.attack_plan))
             return
         
-        print('attacker setup', self.attack_target)
+        # print('attacker setup', self.attack_target)
         match self.attack_plan:
             case EntityType.GUNNER:
                 if not self.rc.can_build_gunner(self.attack_target, self.attack_plan_dir): return
@@ -966,6 +949,7 @@ class BuilderBot(Bot):
             if is_pos_editable(self.rc, p) and self.sense.get_entity(p) not in ENTITY_VALID_BLOCKAGE_ANY:
                 has_free_side = True
 
+        if d == Direction.CENTRE: return (True, Direction.CENTRE)
         if bot_marked: return (False, Direction.CENTRE)
         if has_harvester and already_siphoned: return (False, already_siphoned_dir)
         tgt = get_best_placable_adj_ignorebb(self.rc, pos, self.core_pos)

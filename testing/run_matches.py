@@ -4,6 +4,7 @@ import pandas as pd
 import re
 from time import sleep
 import matplotlib.pyplot as plt
+import random
 
 TEAM = "cheesynachos"
 
@@ -107,7 +108,10 @@ for t in teas:
     team_id.append(parse_ascii_tableid(output2)[0]["team_id"])
 
 for i in range(200):
-    for rank,team,tid in zip(ranks, teams, team_id):
+    pool = [(r, t, tid) for r, t, tid in zip(ranks, teams, team_id) if t != TEAM]
+    selected = random.sample(pool, min(5, len(pool)))
+
+    for rank,team,tid in selected:
         if team == TEAM: continue
         print(rank,team,tid)
         command = ["cambc", "match", "unrated", tid]
