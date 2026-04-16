@@ -73,7 +73,7 @@ class BuilderBot(Bot):
         self.bridge_continue_blacklist: set[Position] = set()
         self.attack_blacklist_set: set[Position] = set()
         self.shuffled_directions = random.sample(DIRECTIONS, len(DIRECTIONS))
-        self.shuffled_splitters = random.sample(CORE_SPLITTER_DIRECTIONS, len(CORE_SPLITTER_DIRECTIONS))
+        self.shuffled_cardinal_directions = random.sample(CARDINAL_DIRECTIONS, len(CARDINAL_DIRECTIONS))
 
         match self.rc.get_position():
             case self.core_pos: self.job = BotJob.HEAL
@@ -172,9 +172,8 @@ class BuilderBot(Bot):
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
         elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
-            print('hi')
-            self.meta_nearest_heal()
-            return
+            if self.meta_nearest_heal():
+                return
         elif len(self.sense.enemy_turrets) != 0 and self.state not in MICRO_EXCLUDE_STATES:
             self.micro_destroy_turrets()
 
@@ -266,7 +265,7 @@ class BuilderBot(Bot):
 
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
-        
+
         # def not_my_problem(pos: Position) -> bool:
         #     if self.rc.is_in_vision(pos):
         #         bb = self.rc.get_tile_builder_bot_id(pos)
@@ -281,24 +280,47 @@ class BuilderBot(Bot):
         
         to_heal = None
         to_heal_dist = 100000
+        to_heal_secondary = None
+        to_heal_secondary_dist = 100000
+        to_heal_is_must = False
+
         for t in self.sense.heal_targets:
             d = self.rc.get_position().distance_squared(t)
+
             if d < to_heal_dist:
+                to_heal_secondary = to_heal
+                to_heal_secondary_dist = to_heal_dist
                 to_heal_dist = d
                 to_heal = t
+            elif d < to_heal_secondary_dist:
+                to_heal_secondary_dist = d
+                to_heal_secondary = t
         
         if to_heal is not None:
             self.rc.draw_indicator_dot(to_heal, 0, 255, 0)
-            
+            moved = False
+
             if self.rc.get_position().distance_squared(to_heal) > GameConstants.ACTION_RADIUS_SQ:
                 pathfind.silly_pathfind_to(self.rc, to_heal.add(get_best_pathable_adj_with_diag(self.rc, to_heal, self.core_pos)))
-                print('moving to heal target' + str(to_heal))
-                # no return - allow immediate heal
+                moved = True
 
+            # heal primary
             if self.rc.can_heal(to_heal):
                 self.rc.heal(to_heal)
-                # no return - allow checks
+
+            # heal secondary if in range
+            if to_heal_secondary is not None:
+                if self.rc.can_heal(to_heal_secondary):
+                    self.rc.heal(to_heal_secondary)
                 
+                # if we didn't move for primary, reposition toward secondary
+                elif not moved:
+                    sec_dist = self.rc.get_position().distance_squared(to_heal_secondary)
+                    if sec_dist > GameConstants.ACTION_RADIUS_SQ:
+                        pathfind.silly_pathfind_to(self.rc, to_heal_secondary.add(
+                            get_best_pathable_adj_with_diag(self.rc, to_heal_secondary, self.core_pos)
+                        ))
+            
             my_pos = self.rc.get_position()
             has_enemy_targeting = False
             launcher_candidate = None
@@ -315,7 +337,9 @@ class BuilderBot(Bot):
                     self.rc.destroy(launcher_candidate)
                 if self.rc.can_build_launcher(launcher_candidate):
                     self.rc.build_launcher(launcher_candidate)
-                return
+            
+            return moved
+        return False
 
     # Econ
 
@@ -431,7 +455,7 @@ class BuilderBot(Bot):
 
         # Validate Walls
         valid_count = 0
-        for d in CARDINAL_DIRECTIONS:
+        for d in self.shuffled_cardinal_directions:
             adj = self.econ_target_ore.add(d)
 
             if adj == self.pathfind_target: continue
@@ -611,6 +635,9 @@ class BuilderBot(Bot):
 
         # print('done', self.attack_target)
         self.switch_back_to_neutral(self.attack_return_to_econ, self.attack_return_to_heal)
+
+    def econ_remove_further_foundries(self):
+        pass
 
     # Defence
 
@@ -823,7 +850,7 @@ class BuilderBot(Bot):
             if p in self.sense.enemy_builders: has_enemy_targeting = True
             if is_pos_quickly_turretable(self.rc, p): launcher_candidate = p
         
-        has_enough_ti = self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.LAUNCHER)
+        has_enough_ti = self.sense.ti_tracker[-1] > (get_ti_cost(self.rc, EntityType.LAUNCHER) * 2)
         if has_enemy_targeting and launcher_candidate is not None and \
             has_enough_ti and not self.is_launcher_protected(my_pos):
             if self.rc.can_destroy(launcher_candidate):
