@@ -22,7 +22,7 @@ ENTITY_GUNNER_PASS = { None, EntityType.MARKER }
 
 ENTITY_INFRASTRUCTURE = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
 ENTITY_TURRET_REPLACABLE = { EntityType.BARRIER } | ENTITY_TRIVIAL
-ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
+ENTITY_VALID_BLOCKAGE_ANY = { EntityType.FOUNDRY, EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
 ENTITY_VALID_BLOCKAGE_FRIENDLY = { EntityType.FOUNDRY, EntityType.CORE } | ENTITY_TURRET | ENTITY_TRANSPORT
 ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } # | ENTITY_TRANSPORT
 
@@ -215,6 +215,25 @@ def get_best_pathable_adj_with_diag(rc: Controller, pos: Position, heu: Position
             best_dir = d
     return best_dir
 
+def get_best_pathable_adj_with_diag_excluding(rc: Controller, pos: Position, heu: Position, dir_to_exclude: Direction) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        if d == dir_to_exclude: continue
+        p = pos.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        
+        if not is_pos_pathable(rc, p): continue
+        # if is_friendly_transport(rc, p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        dist = p.distance_squared(heu)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
 def get_empty_adj(rc: Controller, a: Position) -> Direction:
     for d in CARDINAL_DIRECTIONS:
         p = a.add(d)
@@ -377,3 +396,4 @@ def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> P
     steps = min(steps_x, steps_y)
     if math.isinf(steps): return pos
     return Position(pos.x + dx * steps, pos.y + dy * steps)
+

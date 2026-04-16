@@ -1,7 +1,7 @@
 import pathfind
 from sense import *
 
-from cambc import Controller, Environment, Position, Direction, EntityType
+from cambc import Controller, Environment, Position, Direction, EntityType, GameConstants
 
 def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position, ti_min: int = 0) -> bool:
     if not sense.is_seen(p):
@@ -46,7 +46,36 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position, ti_min:
             if rc.get_position() != p:
                 pathfind.fast_pathfind_to(rc, sense, p)
                 if rc.get_position() != p: return False
-            if rc.can_fire(p):
+            
+            if rc.can_fire(p) and bb_should_fire(rc, sense):
                 rc.fire(p)
+
+    return False
+
+def bb_should_fire(rc: Controller, sense: Sense):
+    be_conservative = sense.ti_tracker[-1] < 50
+    if be_conservative:
+        cur = rc.get_position()
+        bldg = rc.get_tile_building_id(cur)
+        required_turns = (rc.get_hp(bldg) + GameConstants.BUILDER_BOT_ATTACK_DAMAGE - 1) // GameConstants.BUILDER_BOT_ATTACK_DAMAGE
+        return sense.nearest_enemy_cheby_dist >= required_turns
+    return True
+
+def is_getting_ammo(rc: Controller, sense: Sense, pos: Position):
+    for d in CARDINAL_DIRECTIONS:
+        p = pos.add(d)
+        if not is_in_map(p, sense.map_width, sense.map_height): continue
+        if not rc.is_in_vision(p): continue
+        env = sense.get_env(p)
+        if env == Environment.WALL: continue
+        entt = sense.get_entity(p)
+        
+        if entt == EntityType.HARVESTER and env == Environment.ORE_TITANIUM: return True
+        bldg = rc.get_tile_building_id(p)
+        dir = sense.get_direction(p)
+        if bldg is None: continue
+        if entt == EntityType.CONVEYOR          and dir == d.opposite() and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True
+        if entt == EntityType.ARMOURED_CONVEYOR and dir == d.opposite() and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True
+        if entt == EntityType.SPLITTER          and dir != d            and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True
 
     return False

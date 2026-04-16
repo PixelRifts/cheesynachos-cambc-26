@@ -5,7 +5,7 @@ from helpers import *
 from collections import deque
 from typing import Optional, Set, Dict
 from enum import Enum
-from cambc import Controller, Environment, Position, Direction, EntityType
+from cambc import Controller, Environment, Position, Direction, EntityType, GameConstants
 
 ENVIRONMENT_TO_VALUE = {
     None: 0,
@@ -72,6 +72,8 @@ class Sense:
         self.feed_graph: Dict[Position, Set[Position]] = {}
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
+        self.nearest_enemy_bb: Position = None
+        self.nearest_enemy_cheby_dist = float('inf')
 
         self.heal_targets: Set[Position] = set()
         self.enemy_turrets: Set[Position] = set()
@@ -85,6 +87,7 @@ class Sense:
         self.ax_tracker = deque(maxlen=16)
         
         self.turret_cost_map = array('i', [0] * self.size)
+        self.heal_disable_map = array('i', [0] * self.size)
     
         self.symmetries_possible = [ Symmetry.ROTATIONAL, Symmetry.HORIZONTAL, Symmetry.VERTICAL ]
         if self.map_width > self.map_height:
@@ -92,7 +95,7 @@ class Sense:
         elif self.map_height > self.map_width:
             self.symmetries_possible = [ Symmetry.VERTICAL, Symmetry.ROTATIONAL, Symmetry.HORIZONTAL ]
         
-        self.flow_tracking = False
+        self.flow_tracking = True
         
     def config(self, flow_tracking: bool):
         self.flow_tracking = flow_tracking
@@ -176,6 +179,8 @@ class Sense:
         self.ally_transports.clear()
         self.ores.clear()
         self.harvesters.clear()
+        self.nearest_enemy_bb = None
+        self.nearest_enemy_cheby_dist = float('inf')
         
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
@@ -215,8 +220,13 @@ class Sense:
                 self.set_entt_and_env(t, dir, entt, env, allied)
 
             # Heal targets
-            if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
-                self.heal_targets.add(t)
+            if allied:
+                # if self.rc.get_max_hp(bldg) <= 4:
+                if self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
+                    self.heal_targets.add(t)
+                # else:
+                #     if self.rc.get_hp(bldg) <= self.rc.get_max_hp(bldg) - 4:
+                #         self.heal_targets.add(t)
             
             # Env
             if env in ENVIRONMENT_ORE:
@@ -256,6 +266,10 @@ class Sense:
                         self.ally_builders.add(t)
                 else:
                     self.enemy_builders.add(t)
+                    dist = chebyshev_distance(t, my_pos)
+                    if dist < self.nearest_enemy_cheby_dist:
+                        self.nearest_enemy_cheby_dist = dist
+                        self.nearest_enemy_bb = t
 
             if not already_seen:
                 # Crack Symmetry

@@ -1,4 +1,5 @@
 import sys
+from procedure import bb_should_fire
 
 from sense import Sense
 from helpers import *
@@ -19,24 +20,23 @@ ENV_COSTS = {
 # (Allied, Not Allied)
 ENTITY_COSTS = {
     None: (0, 0),
-    EntityType.CORE: (-2, 100000),
+    EntityType.CORE: (0, 100000),
     EntityType.GUNNER: (100, 100000),
     EntityType.SENTINEL: (100, 100000),
     EntityType.BREACH: (100, 100000),
     EntityType.LAUNCHER: (100, 100000),
-    EntityType.CONVEYOR: (-2, -2),
-    EntityType.SPLITTER: (-2, -2),
-    EntityType.ARMOURED_CONVEYOR: (-2, -2),
-    EntityType.BRIDGE: (-2, -2),
+    EntityType.CONVEYOR: (0, 0),
+    EntityType.SPLITTER: (0, 0),
+    EntityType.ARMOURED_CONVEYOR: (0, 0),
+    EntityType.BRIDGE: (0, 0),
     EntityType.HARVESTER: (400, 100000),
     EntityType.FOUNDRY: (400, 100000),
-    EntityType.ROAD: (-2, -2),
+    EntityType.ROAD: (0, 0),
     EntityType.BARRIER: (20, 100000),
-    EntityType.MARKER: (0, -1),
+    EntityType.MARKER: (0, 1),
 }
 
 DEBUG_DRAW = False
-H_WEIGHT = 1.5
 
 class PFState:
     def __init__(self):
@@ -150,7 +150,6 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
 
     map_w = sense.map_width
     map_h = sense.map_height
-    
     while open_set and expansions < max_expansions:
         _, current = heappop(open_set)
         if current in pf_state.closed_set:
@@ -194,6 +193,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
                 if cost >= 100000: continue
             
             tentative = g_score[current] + cost
+            if nxt in pf_state.closed_set: continue
             if nxt in g_score and tentative >= g_score[nxt]: continue
             h = chebyshev_distance(nxt, goal)
             if h < pf_state.best_h:
@@ -204,7 +204,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
             g_score[nxt] = tentative
             heappush(
                 open_set,
-                (tentative + H_WEIGHT * chebyshev_distance(nxt, goal), nxt)
+                (tentative + chebyshev_distance(nxt, goal), nxt)
             )
             
             if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
@@ -230,7 +230,6 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         return True
 
     # start / restart A*
-    print(pf_state.astar_active, not pf_state.result_path, pf_state.goal, target)
     if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target):
         print('got reset')
         pf_state.reset()
@@ -245,6 +244,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     if pf_state.astar_active:
         step_cardinal_astar_internal(rc, sense, max_expansions=200)
         pf_state.computed_this_turn = True
+    
     
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []
@@ -265,14 +265,14 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
                 rc.get_direction(rc.get_tile_building_id(cur)) == conveyor_dir
             )
         ) and not (entt == EntityType.CORE and is_allied)
-        
-        if needs_fix:
+
+        if needs_fix and cur != pf_state.goal:
             if entt is not None:
                 allied = sense.is_allied(cur)
                 if allied:
                     if rc.can_destroy(cur): rc.destroy(cur)
                 else:
-                    if rc.can_fire(cur):
+                    if rc.can_fire(cur) and bb_should_fire(rc, sense):
                         rc.fire(cur)
                 
             if rc.can_build_conveyor(cur, d):
@@ -291,17 +291,23 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
             conveyor_dir = d.opposite()
 
         bb = rc.get_tile_builder_bot_id(next_pos)
-        if bb is not None and rc.get_id() != bb: return # Wait a turn if blocked by a guy
-        
+        if bb is not None and rc.get_id() != bb:
+            print('blocked')
+            return # Wait a turn if blocked by a guy
+
         # Actually move
         moved = False
         allied = sense.is_allied(next_pos)
-        if allied:
+        if allied and next_pos != pf_state.goal:
             if rc.can_destroy(next_pos): rc.destroy(next_pos)
         else:
             if rc.can_fire(next_pos): rc.fire(next_pos)
-        if rc.can_build_conveyor(next_pos, conveyor_dir):
-            rc.build_conveyor(next_pos, conveyor_dir)
+        if next_pos != pf_state.goal:
+            if rc.can_build_conveyor(next_pos, conveyor_dir):
+                rc.build_conveyor(next_pos, conveyor_dir)
+        else:
+            if rc.can_build_road(next_pos):
+                rc.build_road(next_pos)
         if rc.can_move(d):
             rc.move(d)
             pf_state.past_pos = rc.get_position()
@@ -333,11 +339,11 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
     map_h = sense.map_height
     
     while open_set and expansions < max_expansions:
-        _, current = heappop(open_set)
+        f, current = heappop(open_set)
         if current in pf_state.closed_set:
             continue
         pf_state.closed_set.add(current)
-
+        
         if current == goal:
             if DEBUG_DRAW: rc.draw_indicator_dot(current, 0, 255, 0)
             path = reconstruct_path(came_from, current)
@@ -357,6 +363,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
         for d in CARDINAL_DIRECTIONS:
             nxt = current.add(d)
+            if nxt in pf_state.closed_set: continue
             cost = 1
 
             if not is_in_map(nxt, map_w, map_h): continue
@@ -365,8 +372,8 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 entt = sense.get_entity(nxt)
                 allied = sense.is_allied(nxt)
                 if env == Environment.WALL: continue
-                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != pf_state.goal: continue
-                if allied and entt in ENTITY_TRANSPORT: continue
+                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != goal: continue
+                if allied and entt in ENTITY_TRANSPORT and nxt != goal: continue
 
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
@@ -374,13 +381,14 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                     else: continue
                 
             tentative = g_score[current] + cost
+            if nxt in pf_state.closed_set: continue
             if nxt in g_score and tentative >= g_score[nxt]: continue
             
             came_from[nxt] = current
             g_score[nxt] = tentative
             heappush(
                 open_set,
-                (tentative + H_WEIGHT * manhattan_distance(nxt, goal), nxt)
+                (tentative + manhattan_distance(nxt, goal), nxt)
             )
             if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
 

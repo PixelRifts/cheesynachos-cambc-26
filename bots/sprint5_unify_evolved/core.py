@@ -70,7 +70,7 @@ class Core(Bot):
         # target = 1
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:
-            if self.econ_count <= self.rush_count:
+            if self.econ_count <= 2*self.rush_count:
                 self.spawn_econ()
                 return
             if not self.spawn_rush():
