@@ -42,17 +42,41 @@ class Launcher(Bot):
         pass
 
     def turn(self):
+        self.far()
+
+    def far(self):
+        my_pos = self.rc.get_position()
+        
         allied_positions = []
+        additionally_weight = {}
         bldgs = self.rc.get_nearby_buildings()
         for bldg in bldgs:
-            if self.rc.get_team(bldg) == self.rc.get_team() and \
-                self.rc.get_entity_type(bldg) not in ENTITY_TRIVIAL:
-                allied_positions.append(self.rc.get_position(bldg))
-            
-        self.far(allied_positions)
+            if self.rc.get_team(bldg) == self.rc.get_team():
+                entt = self.rc.get_entity_type(bldg)
+                if entt == EntityType.LAUNCHER and bldg > self.rc.get_id():
+                    
+                    valid = True
+                    valid_posns = []
+                    turret_pos = self.rc.get_position(bldg)
+                    for d in DIRECTIONS:
+                        p = turret_pos.add(d)
+                        if not is_in_map(p, self.rc.get_map_width(), self.rc.get_map_height()): continue
+                        if not self.rc.is_in_vision(p): continue
+                        bb_there = self.rc.get_tile_builder_bot_id(turret_pos)
+                        if bb_there is not None and self.rc.get_team(bb_there) != self.rc.get_team():
+                            valid = False
+                            break
+                        valid_posns.append(p)
 
-    def far(self, allied_positions: list[Position]):
-        my_pos = self.rc.get_position()
+                    if valid:
+                        for p in valid_posns:
+                            dist_weight = turret_pos.distance_squared(my_pos)
+                            additionally_weight[p] = max(additionally_weight.get(p, 0), 10000 + dist_weight)
+                    else:
+                        allied_positions.append(self.rc.get_position(bldg))
+                elif entt not in ENTITY_TRIVIAL:
+                    allied_positions.append(self.rc.get_position(bldg))
+            
         nearby_tiles = self.rc.get_nearby_tiles()
         bots = [my_pos.add(d) for d in DIRECTIONS]
 
@@ -86,7 +110,7 @@ class Launcher(Bot):
             tile_ally_min = {pos: 0 for pos in nearby_tiles}
 
         tile_base_score = {
-            pos: tile_ally_min[pos]*3
+            pos: tile_ally_min[pos]*3 + additionally_weight.get(pos, 0)
             for pos in nearby_tiles
         }
 
@@ -101,7 +125,7 @@ class Launcher(Bot):
                     
                     return
                 else:
-                    print("couldnt launch",enemy_pos, " to ", pos)
+                    print("couldnt launch", enemy_pos, " to ", pos)
     
 
     def end_turn(self):

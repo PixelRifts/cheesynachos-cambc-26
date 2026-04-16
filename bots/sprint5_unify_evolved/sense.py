@@ -75,13 +75,14 @@ class Sense:
         self.nearest_enemy_bb: Position = None
         self.nearest_enemy_cheby_dist = float('inf')
 
-        self.heal_targets: Set[Position] = set()
-        self.enemy_turrets: Set[Position] = set()
-        self.ally_turrets: Set[Position] = set()
-        self.enemy_transports: Set[Position] = set()
-        self.ally_transports: Set[Position] = set()
-        self.ores: Set[Position] = set()
-        self.harvesters: Set[Position] = set()
+        self.heal_targets: list[Position] = []
+        self.enemy_turrets: list[Position] = []
+        self.ally_turrets: list[Position] = []
+        self.enemy_transports: list[Position] = []
+        self.ally_bridges: list[Position] = []
+        self.ally_transports: list[Position] = []
+        self.ores: list[Position] = []
+        self.harvesters: list[Position] = []
         
         self.ti_tracker = deque(maxlen=16)
         self.ax_tracker = deque(maxlen=16)
@@ -176,6 +177,7 @@ class Sense:
         self.enemy_turrets.clear()
         self.ally_turrets.clear()
         self.enemy_transports.clear()
+        self.ally_bridges.clear()
         self.ally_transports.clear()
         self.ores.clear()
         self.harvesters.clear()
@@ -223,29 +225,31 @@ class Sense:
             if allied:
                 # if self.rc.get_max_hp(bldg) <= 4:
                 if self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
-                    self.heal_targets.add(t)
+                    self.heal_targets.append(t)
                 # else:
                 #     if self.rc.get_hp(bldg) <= self.rc.get_max_hp(bldg) - 4:
-                #         self.heal_targets.add(t)
+                #         self.heal_targets.append(t)
             
             # Env
             if env in ENVIRONMENT_ORE:
-                self.ores.add(t)
+                self.ores.append(t)
             
             # Infra
             if not allied:
                 if entt in ENTITY_TURRET:
-                    self.enemy_turrets.add(t)
+                    self.enemy_turrets.append(t)
                 elif entt in ENTITY_TRANSPORT:
-                    self.enemy_transports.add(t)
+                    self.enemy_transports.append(t)
             else:
                 if entt in ENTITY_TURRET:
-                    self.ally_turrets.add(t)
+                    self.ally_turrets.append(t)
                 elif entt in ENTITY_TRANSPORT:
-                    self.ally_transports.add(t)
+                    self.ally_transports.append(t)
+                    if entt == EntityType.BRIDGE:
+                        self.ally_bridges.append(t)
             
             if entt == EntityType.HARVESTER:
-                self.harvesters.add(t)
+                self.harvesters.append(t)
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:

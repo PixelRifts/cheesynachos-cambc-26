@@ -30,6 +30,7 @@ class BotState(Enum):
     ECON_TARGET  = "Target"
     ECON_CONNECT = "Connect"
     ECON_PLACE_FOUNDRY = "Place Foundry"
+    ECON_REMOVE_FURTHER_FOUNDRIES = "Remove Further Foundries"
     ECON_NUKE    = "Nuke"
 
     DEFENCE_TO_HARVESTER = "Def Harvester"
@@ -47,7 +48,7 @@ class BotState(Enum):
 NO_STUCK_DETECTION_STATES = { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 HEAL_EXCLUDE_STATES =       { BotState.ECON_CONNECT }
 MICRO_EXCLUDE_STATES =      { BotState.ECON_CONNECT }
-ECON_STATES =               { BotState.ECON_EXPLORE, BotState.ECON_TARGET, BotState.ECON_CONNECT, BotState.ECON_PLACE_FOUNDRY, BotState.ECON_NUKE }
+ECON_STATES =               { BotState.ECON_EXPLORE, BotState.ECON_TARGET, BotState.ECON_CONNECT, BotState.ECON_PLACE_FOUNDRY, BotState.ECON_REMOVE_FURTHER_FOUNDRIES, BotState.ECON_NUKE }
 
 class BuilderBot(Bot):
     def __init__(self, rc: Controller):
@@ -69,6 +70,7 @@ class BuilderBot(Bot):
         self.foundry_locked = set()
 
         self.attack_blacklist_queue: deque[(Position, int)] = deque()
+        self.bridge_continue_blacklist: set[Position] = set()
         self.attack_blacklist_set: set[Position] = set()
         self.shuffled_directions = random.sample(DIRECTIONS, len(DIRECTIONS))
         self.shuffled_splitters = random.sample(CORE_SPLITTER_DIRECTIONS, len(CORE_SPLITTER_DIRECTIONS))
@@ -188,6 +190,8 @@ class BuilderBot(Bot):
                 self.econ_connect()
             case BotState.ECON_PLACE_FOUNDRY:
                 self.econ_place_foundry()
+            case BotState.ECON_REMOVE_FURTHER_FOUNDRIES:
+                self.econ_remove_further_foundries()
             case BotState.ECON_NUKE:
                 self.econ_nuke()
             
@@ -260,7 +264,6 @@ class BuilderBot(Bot):
         self.attack_return_to_heal = to_heal
         return
 
-
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
         
@@ -314,12 +317,37 @@ class BuilderBot(Bot):
                     self.rc.build_launcher(launcher_candidate)
                 return
 
-        
     # Econ
 
     def econ_explore(self):
         my_pos = self.rc.get_position()
 
+        # Takeover logic
+        budget = min(1300, self.rc.get_cpu_time_elapsed() + 100)
+        for b in self.sense.ally_bridges:
+            print(b)
+            if not self.rc.is_in_vision(b): continue
+            bldg = self.rc.get_tile_building_id(b)
+            resource = self.rc.get_stored_resource(bldg)
+            if not resource: continue
+            tgt = self.rc.get_bridge_target(bldg)
+            if tgt in self.bridge_continue_blacklist: continue
+            allied = self.sense.is_allied(tgt)
+            entt = self.sense.get_entity(tgt)
+            if self.sense.is_seen(tgt) and not (allied and entt in ENTITY_INFRASTRUCTURE):
+                print(b)
+                if pathfind.fast_pathfind_to(self.rc, self.sense, tgt):
+                    is_ax = resource == ResourceType.RAW_AXIONITE
+                    self.switch_state(BotState.ECON_CONNECT)
+                    self.pathfind_target = self.core_pos
+                    self.econ_target_is_ax = is_ax
+                
+                if pathfind.pf_state.failed:
+                    self.bridge_continue_blacklist.add(tgt)
+            if self.rc.get_cpu_time_elapsed() > budget:
+                print('breaking')
+                break
+    
         # Pick nearest Titanium Ore to target
         closest_ore = None
         closest_ore_dir = Direction.CENTRE
@@ -423,7 +451,7 @@ class BuilderBot(Bot):
                 valid_count += 1
             else:
                 goto = self.econ_target_ore if ore_has in ENTITY_WALKABLE else adj.add(get_best_empty_adj(self.rc, adj, self.core_pos))
-                if try_destroy(self.rc, self.sense, goto, adj):
+                if try_destroy(self.rc, self.sense, goto, adj, ti_min=get_ti_cost(self.rc, EntityType.BARRIER)):
                     if self.rc.can_build_barrier(adj):
                         self.rc.build_barrier(adj)
                         valid_count += 1
@@ -444,7 +472,7 @@ class BuilderBot(Bot):
         # Validate Harvester
         if self.sense.get_entity(self.econ_target_ore) != EntityType.HARVESTER and is_adjacent(self.rc.get_position(), self.econ_target_ore):
             # print('trydestroy?')
-            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore):
+            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore, ti_min=get_ti_cost(self.rc, EntityType.HARVESTER)):
                 return
             # print('trybuildharvester')
             if self.rc.can_build_harvester(self.econ_target_ore):
@@ -529,6 +557,13 @@ class BuilderBot(Bot):
                 return
             
             pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
+            if self.rc.is_in_vision(self.econ_connect_current_target):
+                entt = self.sense.get_entity(self.econ_connect_current_target)
+                allied = self.sense.is_allied(self.econ_connect_current_target)
+                if allied and entt in ENTITY_INFRASTRUCTURE:
+                    self.switch_to_possibly_patrol()
+                    return
+
         else:
             # print('5')
             if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
@@ -825,7 +860,6 @@ class BuilderBot(Bot):
             print(get_ti_cost(self.rc, self.attack_plan))
             return
         
-
         print('attacker setup', self.attack_target)
         match self.attack_plan:
             case EntityType.GUNNER:

@@ -59,7 +59,7 @@ class Core(Bot):
 
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
-        if self.healer_needed() or (self.sees_enemy_builder_bot() and self.healer_count < 1):
+        if self.healer_needed() or (self.healer_count < 1):
             if self.healer_needed(): print("Healer needed!")
             else: print("Enemy builder bot spotted!")
             self.spawn_healer()
@@ -130,7 +130,7 @@ class Core(Bot):
             #         effective_hp += 4
 
             hp_threshold = 9 if bldg in self.active_rescue_ops else 13  # DONOT CHANGE !!!
-            if hp < hp_threshold:
+            if hp < min(hp_threshold, self.rc.get_max_hp(bldg)):
                 self.mark_rescue_operation(bldg)
                 return True
 
