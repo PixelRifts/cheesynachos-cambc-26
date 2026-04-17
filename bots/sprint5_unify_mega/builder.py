@@ -1100,10 +1100,14 @@ class BuilderBot(Bot):
         #     self.sense.config(flow_tracking=True)
         # return
         harvester_pos = self.econ_connect_source_harvester
-        self.switch_state(BotState.DEFENCE_STATIONED)
         mid_x = (harvester_pos.x + self.core_pos.x) // 2
         mid_y = (harvester_pos.y + self.core_pos.y) // 2
-        self.defence_station = Position(mid_x, mid_y)
+        defence_station = Position(mid_x, mid_y)
+        if chebyshev_distance(defence_station, self.core_pos) <= 5:
+            self.switch_to_econ()
+        else:
+            self.switch_state(BotState.DEFENCE_STATIONED)
+            self.defence_station = defence_station
 
     def switch_to_econ(self):
         self.switch_state(BotState.ECON_EXPLORE)
