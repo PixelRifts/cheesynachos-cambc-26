@@ -1,0 +1,424 @@
+import sys
+import math
+import random
+
+from sense import *
+
+from typing import Optional
+from enum import Enum
+from cambc import Controller, Environment, Position, Direction, EntityType, ResourceType
+
+RANDOM_SEED = 1278
+
+ENTITY_TRANSPORT   = { EntityType.CONVEYOR, EntityType.BRIDGE, EntityType.SPLITTER, EntityType.ARMOURED_CONVEYOR }
+ENTITY_TURRET      = { EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH, EntityType.LAUNCHER }
+ENTITY_TRIVIAL     = { None, EntityType.ROAD, EntityType.MARKER }
+ENTITY_CORE        = { EntityType.CORE }
+ENTITY_REPLACABLE  = { EntityType.BARRIER }
+ENTITY_UNWALKABLE  = { EntityType.HARVESTER, EntityType.FOUNDRY, EntityType.BARRIER } | ENTITY_TURRET
+ENTITY_WALKABLE    = ENTITY_TRIVIAL | ENTITY_TRANSPORT
+ENTITY_DIRECTIONAL = { EntityType.CONVEYOR, EntityType.ARMOURED_CONVEYOR, EntityType.SPLITTER, EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH }
+ENTITY_GUNNER_PASS = { None, EntityType.MARKER }
+
+ENTITY_INFRASTRUCTURE = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+ENTITY_INFRASTRUCTURE_RESOURCE_SINK = { EntityType.CORE, EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+ENTITY_TURRET_REPLACABLE = { EntityType.BARRIER } | ENTITY_TRIVIAL
+ENTITY_VALID_BLOCKAGE_ANY = { EntityType.FOUNDRY, EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
+ENTITY_VALID_BLOCKAGE_FRIENDLY = { EntityType.FOUNDRY, EntityType.CORE } | ENTITY_TURRET | ENTITY_TRANSPORT
+ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } # | ENTITY_TRANSPORT
+
+ENTITY_INVALID_ATTACK_ANY      = { EntityType.HARVESTER }
+ENTITY_INVALID_ATTACK_FRIENDLY = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+
+RESOURCE_ALLOWED_AMMO = { ResourceType.TITANIUM, ResourceType.REFINED_AXIONITE }
+ENVIRONMENT_ORE = { Environment.ORE_AXIONITE, Environment.ORE_TITANIUM }
+
+
+MAX_MAP_WIDTH = 50
+MAX_MAP_HEIGHT = 50
+MAX_MAP_SIZE = MAX_MAP_WIDTH * MAX_MAP_HEIGHT
+POSITION_GLOBAL_CACHE: list[Position] = [
+    Position(i % MAX_MAP_WIDTH, i // MAX_MAP_WIDTH) for i in range(MAX_MAP_SIZE)
+]
+POSITION_CACHE: list[Position] = []
+
+def is_in_map(pos: Position, width, height) -> bool:
+    return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
+
+def dist_to_nearest_target(x: Position, target_tiles: list[Position]):
+    best = 10000000000
+    for t in target_tiles:
+        d = t.distance_squared(x)
+        if d < best:
+            best = d
+            if best == 0:
+                break
+    return best
+
+def get_ti_cost(rc: Controller, entt: EntityType) -> int:
+    match entt:
+        case EntityType.BUILDER_BOT: return rc.get_builder_bot_cost()[0]
+        case EntityType.CORE: return 0
+        case EntityType.GUNNER: return rc.get_gunner_cost()[0]
+        case EntityType.SENTINEL: return rc.get_sentinel_cost()[0]
+        case EntityType.BREACH: return rc.get_breach_cost()[0]
+        case EntityType.LAUNCHER: return rc.get_launcher_cost()[0]
+        case EntityType.CONVEYOR: return rc.get_conveyor_cost()[0]
+        case EntityType.SPLITTER: return rc.get_splitter_cost()[0]
+        case EntityType.ARMOURED_CONVEYOR: return rc.get_armoured_conveyor_cost()[0]
+        case EntityType.BRIDGE: return rc.get_bridge_cost()[0]
+        case EntityType.HARVESTER: return rc.get_harvester_cost()[0]
+        case EntityType.FOUNDRY: return rc.get_foundry_cost()[0]
+        case EntityType.ROAD: return rc.get_road_cost()[0]
+        case EntityType.BARRIER: return rc.get_barrier_cost()[0]
+        case EntityType.MARKER: return 0
+
+# Symmetry Functions:
+
+class Symmetry(Enum):
+    ROTATIONAL = 'rotational'
+    VERTICAL = 'vertical'
+    HORIZONTAL = 'horizontal'
+
+def guess_symmetry(width: int, height: int) -> Symmetry:
+    if width > height: return Symmetry.HORIZONTAL
+    elif height > width: return Symmetry.VERTICAL
+    return Symmetry.ROTATIONAL
+
+def get_symmetric(pos: Position, width: int, height: int, sym: Symmetry) -> Position:
+    match sym:
+        case Symmetry.ROTATIONAL: return Position(width - 1 - pos.x, height - 1 - pos.y)
+        case Symmetry.VERTICAL:   return Position(pos.x,             height - 1 - pos.y)
+        case Symmetry.HORIZONTAL: return Position(width - 1 - pos.x, pos.y             )
+    assert False
+
+def reflect(pos: Position, pivot: Position) -> Position:
+    return Position(2 * pivot.x - pos.x, 2 * pivot.y - pos.y)
+
+# Quick Pos Checks
+
+def is_pos_pathable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos) or rc.is_tile_passable(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    entt = rc.get_entity_type(bldg)
+    allied = rc.get_team() == rc.get_team(bldg)
+    return is_entt_pathable(entt, allied)
+
+def is_pos_conveyorable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    allied = rc.get_team() == rc.get_team(bldg)
+    entt = rc.get_entity_type(bldg)
+    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL) or (allied and entt == EntityType.BARRIER)
+
+def is_pos_editable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    allied = rc.get_team() == rc.get_team(bldg)
+    return allied
+
+def is_pos_quickly_turretable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    allied = rc.get_team() == rc.get_team(bldg)
+    entt = rc.get_entity_type(bldg)
+    return allied and entt in ENTITY_TURRET_REPLACABLE
+
+
+def is_pos_turretable(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return True
+    env = rc.get_tile_env(pos)
+    if env == Environment.WALL: return False
+    
+    bldg = rc.get_tile_building_id(pos)
+    allied = rc.get_team() == rc.get_team(bldg)
+    entt = rc.get_entity_type(bldg)
+    return (not allied and entt in ENTITY_WALKABLE) or (allied and entt in ENTITY_TURRET_REPLACABLE)
+
+def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
+    if entt in ENTITY_WALKABLE: return True
+    if allied: return entt in ENTITY_CORE
+    return False
+
+# Quick Entity Checks
+
+def is_friendly_transport(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return False
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return False
+    allied = rc.get_team(bldg) == rc.get_team()
+    entt = rc.get_entity_type(bldg)
+    return allied and entt in ENTITY_TRANSPORT
+
+def is_enemy_transport(rc: Controller, pos: Position) -> bool:
+    if rc.is_tile_empty(pos): return False
+    bldg = rc.get_tile_building_id(pos)
+    if bldg is None: return False
+    allied = rc.get_team(bldg) == rc.get_team()
+    entt = rc.get_entity_type(bldg)
+    return not allied and entt in ENTITY_TRANSPORT
+
+
+# Adjacency Stuff
+
+def get_best_placable_adj_ignorebb(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dir = Direction.CENTRE
+    best_score = -1000000
+    
+    for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not (is_pos_conveyorable(rc, p) and not is_enemy_transport(rc, p)): continue
+        dist = p.distance_squared(b)
+        score = -dist
+        if rc.get_tile_env(p) in ENVIRONMENT_ORE: score -= 10
+        
+        if score > best_score:
+            best_score = score
+            best_dir = d
+    return best_dir
+
+def get_best_placable_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        if not (is_pos_turretable(rc, p) and not is_enemy_transport(rc, p)): continue
+        dist = p.distance_squared(b)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
+def get_best_pathable_adj_with_diag(rc: Controller, pos: Position, heu: Position) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        p = pos.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        
+        if not is_pos_pathable(rc, p): continue
+        # if is_friendly_transport(rc, p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        dist = p.distance_squared(heu)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
+def get_best_pathable_adj_with_diag_excluding(rc: Controller, pos: Position, heu: Position, dir_to_exclude: Direction) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        if d == dir_to_exclude: continue
+        p = pos.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        
+        if not is_pos_pathable(rc, p): continue
+        # if is_friendly_transport(rc, p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        dist = p.distance_squared(heu)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
+def get_empty_adj(rc: Controller, a: Position) -> Direction:
+    for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if is_friendly_transport(rc, p): continue
+        # bb = rc.get_tile_builder_bot_id(p)
+        # if bb is not None: continue
+        if is_pos_pathable(rc, p): return d
+    return Direction.CENTRE
+
+def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
+    best_score = -1000000
+    best_dir = Direction.CENTRE
+    for d in CARDINAL_DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not is_pos_pathable(rc, p): continue
+        if is_friendly_transport(rc, p): continue
+        # bb = rc.get_tile_builder_bot_id(p)
+        # if bb is not None and rc.get_id(): continue
+
+        score = -p.distance_squared(b) + (-100 if rc.get_entity_type(rc.get_tile_building_id(p)) == EntityType.BARRIER else 0)
+        if score > best_score:
+            best_score = score
+            best_dir = d
+    return best_dir
+
+def get_best_empty_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_score = -1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        p = a.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if not is_pos_pathable(rc, p): continue
+        if is_friendly_transport(rc, p): continue
+        # bb = rc.get_tile_builder_bot_id(p)
+        # if bb is not None and rc.get_id(): continue
+
+        score = -p.distance_squared(b) + (-100 if rc.get_entity_type(rc.get_tile_building_id(p)) == EntityType.BARRIER else 0)
+        if score > best_score:
+            best_score = score
+            best_dir = d
+    return best_dir
+
+def is_adjacent(a: Position, b: Position, debug: bool = False) -> bool:
+    dx = abs(a.x - b.x)
+    dy = abs(a.y - b.y)
+    if debug: print(dx, dy, dx + dy == 1, file=sys.stderr)
+    return dx + dy == 1
+
+def is_adjacent_with_diag(a: Position, b: Position, debug: bool = False) -> bool:
+    dx = abs(a.x - b.x)
+    dy = abs(a.y - b.y)
+    if debug: print(dx, dy, dx + dy == 1, file=sys.stderr)
+    return dx <= 1 and dy <= 1
+
+def manhattan_distance(a: Position, b: Position) -> int:
+    return abs(a.x - b.x) + abs(a.y - b.y)
+
+def chebyshev_distance(a, b):
+    return max(abs(a.x - b.x), abs(a.y - b.y))
+
+# Direction Helpers
+
+DIRECTIONS = [d for d in Direction if d != Direction.CENTRE]
+CARDINAL_DIRECTIONS = [Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST]
+DIRECTIONS_ORDERED = [
+    Direction.NORTH, Direction.NORTHEAST, Direction.EAST, Direction.SOUTHEAST,
+    Direction.SOUTH, Direction.SOUTHWEST, Direction.WEST, Direction.NORTHWEST
+]
+DIRECTIONS_ORDERED_CARDINALS_FIRST = [
+    Direction.NORTH, Direction.EAST,
+    Direction.SOUTH, Direction.WEST,
+    Direction.NORTHEAST, Direction.SOUTHEAST,
+    Direction.SOUTHWEST, Direction.NORTHWEST,
+]
+CORE_SPLITTER_DIRECTIONS = [
+    (Direction.EAST, Direction.NORTHEAST),
+    (Direction.EAST, Direction.SOUTHEAST),
+    (Direction.WEST, Direction.NORTHWEST),
+    (Direction.WEST, Direction.SOUTHWEST),
+    (Direction.NORTH, Direction.NORTHWEST),
+    (Direction.NORTH, Direction.NORTHEAST),
+    (Direction.SOUTH, Direction.SOUTHWEST),
+    (Direction.SOUTH, Direction.SOUTHEAST),
+]
+
+def degrees_between(d1, d2):
+    if d1 == Direction.CENTRE or d2 == Direction.CENTRE:
+        return 0
+
+    diff = abs(DIRECTIONS_ORDERED[d1] - DIRECTIONS_ORDERED[d2])
+    if diff > 4:
+        diff = 8 - diff
+
+    return diff * 45
+
+def cardinal_direction_to(me: Position, other: Position) -> Direction:
+    dx = other.x - me.x
+    dy = other.y - me.y
+
+    if dx == 0 and dy == 0:
+        return Direction.CENTRE
+
+    if abs(dx) > abs(dy):
+        return Direction.EAST if dx > 0 else Direction.WEST
+    else:
+        return Direction.SOUTH if dy > 0 else Direction.NORTH
+
+def is_near_center(pos, w, h):
+    cx, cy = w // 2, h // 2
+
+    # distance to center (chebyshev)
+    dc = max(abs(pos.x - cx), abs(pos.y - cy))
+
+    # distance to nearest edge
+    de = min(pos.x, pos.y, w - 1 - pos.x, h - 1 - pos.y)
+
+    # tune thresholds as needed
+    if dc <= min(w, h) // 6:
+        return True
+    if de <= min(w, h) // 6:
+        return False
+    return False
+
+def biased_random_dir(rc: Controller, core_pos: Position) -> Direction:
+    c = random.randint(0, 10)
+    if c < 3:
+        to_center = rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
+        if is_near_center(core_pos, rc.get_map_width(), rc.get_map_height()):
+            opp = to_center.opposite()
+            return random.choice([opp, opp.rotate_left(), opp.rotate_right()])
+        
+        return random.choice([to_center, to_center.rotate_left(), to_center.rotate_right()])
+    return random.choice(DIRECTIONS)
+
+def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> Position:
+    width = rc.get_map_width()
+    height = rc.get_map_height()
+
+    (dx, dy) = dir.delta()
+
+    if dx > 0:
+        steps_x = (width - 1 - pos.x) // dx
+    elif dx < 0:
+        steps_x = pos.x // (-dx)
+    else:
+        steps_x = float('inf')
+
+    if dy > 0:
+        steps_y = (height - 1 - pos.y) // dy
+    elif dy < 0:
+        steps_y = pos.y // (-dy)
+    else:
+        steps_y = float('inf')
+
+    steps = min(steps_x, steps_y)
+    if math.isinf(steps): return pos
+    return Position(pos.x + dx * steps, pos.y + dy * steps)
+
+def get_turret_tiles(rc: Controller, e: EntityType, p: Position, dir: Direction):
+    tiles = []
+    match e:
+        case EntityType.LAUNCHER: tiles.extend([p.add(d) for d in DIRECTIONS])
+        case EntityType.GUNNER:
+            for d in DIRECTIONS:
+                a = p.add(d)
+                tiles.append(a)
+                a = a.add(d)
+                tiles.append(a)
+                if d not in CARDINAL_DIRECTIONS: continue
+                a = a.add(d)
+                tiles.append(a)
+        case _: tiles.extend(rc.get_attackable_tiles_from(p, dir, e))
+    return tiles
