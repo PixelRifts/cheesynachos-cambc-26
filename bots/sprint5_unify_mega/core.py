@@ -7,6 +7,7 @@ from collections import deque
 
 AXIONITE_STOCKPILE_THRESHOLD_ROUND = 1200
 AXIONITE_MIN_STOCKPILE = 41
+TITANIUM_MAINTAIN_AMOUNT = 1000
 
 class Core(Bot):
     def __init__(self, rc: Controller):
@@ -28,9 +29,10 @@ class Core(Bot):
 
     def start_turn(self):
         ti, ax = self.rc.get_global_resources()
+
         if self.rc.get_current_round() < AXIONITE_STOCKPILE_THRESHOLD_ROUND:
             excess = ax - AXIONITE_MIN_STOCKPILE
-            if excess > 0:
+            if excess > 0 and ti < TITANIUM_MAINTAIN_AMOUNT:
                 self.rc.convert(excess)
             ti, ax = self.rc.get_global_resources()
 
@@ -58,25 +60,52 @@ class Core(Bot):
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
         if self.healer_count < 1:
-            if self.sees_enemy_builder_bot() or self.sees_conveyor_belt():
-                print("Enemy builder / converyor belt spotted!")
+            if self.sees_enemy_builder_bot() or self.sees_conveyor():
+                print("Enemy builder or conveyor spotted!")
                 self.spawn_healer()
-        elif self.healer_needed():
-            if self.healer_needed(): print("Healer needed!")
-            else: print("Enemy builder bot spotted!")
-            self.spawn_healer()
+                return
+        bldg = self.healer_needed()
+        if bldg is not None:
+            print("Healer needed for building", bldg)
+            if self.spawn_healer():
+                self.mark_rescue_operation(bldg)
+                return
         
-        target = 3 + turn // 40
-        if self.ti_tracker[-1] > (self.rc.get_builder_bot_cost()[0]*4): target = 3 + turn // 30
+        if self.rush_count < 1:
+            self.spawn_rush()
+            return
+        
+        ti = self.rc.get_global_resources()[0]
+        bbcost = self.rc.get_builder_bot_cost()[0]
+        harcost = self.rc.get_harvester_cost()[0]
+        if ti > (bbcost+harcost)*self.econ_count:
+            self.spawn_builder()
 
+        target = 4 + turn // 50
         print(target, self.econ_count, self.rush_count)
-        if self.econ_count + self.rush_count < target:        
-            if self.econ_count <= 2*self.rush_count:
+
+        if self.econ_count + self.rush_count < target:
+            self.spawn_builder()
+        
+    def spawn_builder(self):
+        ti = self.rc.get_global_resources()[0]
+        e_r = 1
+        e_c = 1
+        if ti < 500:
+            e_r = 3
+        elif ti < 1000:
+            e_r = 2
+        elif ti < 1500:
+            e_r = 1
+        else:
+            e_c = 2
+        if e_c * self.econ_count <= e_r * self.rush_count:
                 self.spawn_econ()
                 return
-            if not self.spawn_rush():
-                self.spawn_econ()
-            return
+        if not self.spawn_rush():
+            self.spawn_econ()
+        return
+            
 
     def spawn_econ(self):
         if self.ore_dir is not None:
@@ -99,16 +128,14 @@ class Core(Bot):
         return False
 
     def spawn_healer(self):
-        print("Spawning healer bot!")
         spawn_pos = self.rc.get_position()
-        print("builderbot cost", self.rc.get_builder_bot_cost())
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
             self.healer_count += 1
-        else:
-            print("Failed to spawn healer bot!")
+            return True
+        return False
 
-    def healer_needed(self) -> bool:
+    def healer_needed(self):
         for bldg in self.rc.get_nearby_buildings():
             if self.rc.get_team(bldg) != self.rc.get_team():
                 continue
@@ -117,14 +144,28 @@ class Core(Bot):
 
             # bldg_pos = self.rc.get_position(bldg)
             hp = self.rc.get_hp(bldg)
-            
+
+            # Effective HP logic - Didnt Work.
+            # effective_hp = hp
+            # if self.rc.is_in_vision(bldg_pos):
+            #     bb_here = self.rc.get_tile_builder_bot_id(bldg_pos)
+            #     if bb_here is not None and self.rc.get_team(bb_here) == self.rc.get_team():
+            #         effective_hp += 4
+            # for d in DIRECTIONS:
+            #     adj = bldg_pos.add(d)
+            #     if not self.rc.is_in_vision(adj):
+            #         continue
+            #     bb = self.rc.get_tile_builder_bot_id(adj)
+            #     if bb is None:
+            #         continue
+            #     if self.rc.get_team(bb) == self.rc.get_team():
+            #         effective_hp += 4
+
             hp_threshold = 9 if bldg in self.active_rescue_ops else 13  # DONOT CHANGE !!!
             if hp < hp_threshold:
-                print(f"Building {bldg} needs healing!")
-                self.mark_rescue_operation(bldg)
-                return True
+                return bldg
 
-        return False
+        return None
     
     def sees_enemy_builder_bot(self) -> bool:
         for t in self.rc.get_nearby_tiles():
@@ -139,12 +180,17 @@ class Core(Bot):
 
         return False
     
-    def sees_conveyor_belt(self):
-        for bldg in self.rc.get_nearby_buildings():
-            if self.rc.get_team(bldg) != self.rc.get_team():
+    def sees_conveyor(self) -> bool:
+        for t in self.rc.get_nearby_tiles():
+            if not self.rc.is_in_vision(t):
                 continue
-            if self.rc.get_entity_type(bldg) == EntityType.CONVEYOR:
+
+            bldg = self.rc.get_tile_building_id(t)
+            if bldg is None:
+                continue
+            if self.rc.get_team(bldg) == self.rc.get_team() and self.rc.get_entity_type(bldg) == EntityType.CONVEYOR:
                 return True
+
         return False
 
     def end_turn(self):
