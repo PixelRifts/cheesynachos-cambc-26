@@ -22,7 +22,7 @@ PRIORITIES = {
     EntityType.FOUNDRY: 100,
     EntityType.ROAD: 1,
     EntityType.BARRIER: 8,
-    EntityType.MARKER: 1,
+    EntityType.MARKER: -10,
 }
 
 class Gunner(Bot):
@@ -68,8 +68,8 @@ class Gunner(Bot):
             e = self.rc.get_tile_building_id(p)
             bb = self.rc.get_tile_builder_bot_id(p)
 
-            current_tile_priority = -float('inf')
-
+            current_tile_priority = -float('inf')\
+            
             if bb is not None and self.rc.get_team(bb) != self.rc.get_team():
                 current_tile_priority = PRIORITIES.get(EntityType.BUILDER_BOT, 0)
 
