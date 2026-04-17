@@ -57,15 +57,18 @@ class Core(Bot):
 
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
-        if self.healer_needed() or (self.healer_count < 1):
-            if self.healer_needed(): print("Healer needed!")
-            else: print("Enemy builder bot spotted!")
-            self.spawn_healer()
+        if self.healer_count < 1:
+            _ = self.spawn_healer()
+
+        dmg_bldg = self.healer_needed()
+
+        if dmg_bldg is not None:
+            print("Healer needed!, bldg:" + str(dmg_bldg))
+            if self.spawn_healer():
+                self.mark_rescue_operation(dmg_bldg)
+                return
         
         target = 3 + turn // 50
-        # if self.rc.get_current_round() > 50: target = 4 + turn // 80
-        # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
-        # target = 1
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:
             if self.econ_count <= 2*self.rush_count:
@@ -100,8 +103,10 @@ class Core(Bot):
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
             self.healer_count += 1
+            return True
+        return False
 
-    def healer_needed(self) -> bool:
+    def healer_needed(self) -> int:
         for bldg in self.rc.get_nearby_buildings():
             if self.rc.get_team(bldg) != self.rc.get_team():
                 continue
@@ -129,10 +134,9 @@ class Core(Bot):
 
             hp_threshold = 9 if bldg in self.active_rescue_ops else 13  # DONOT CHANGE !!!
             if hp < min(hp_threshold, self.rc.get_max_hp(bldg)):
-                self.mark_rescue_operation(bldg)
-                return True
+                return bldg
 
-        return False
+        return None
     
     def sees_enemy_builder_bot(self) -> bool:
         for t in self.rc.get_nearby_tiles():

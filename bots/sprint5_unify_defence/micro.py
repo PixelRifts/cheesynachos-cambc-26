@@ -24,7 +24,7 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
     distance_index = min(chebyshev_distance(my_pos, poi), len(DISTANCE_SCORE_LUT) - 1)
     score += DISTANCE_SCORE_LUT[distance_index]
 
-    is_empty = rc.is_tile_empty(poi)
+    is_empty = rc.is_tile_empty(poi) or sense.is_allied(poi)
     if is_empty: score += 100
 
     # Axionite not secured penalty
