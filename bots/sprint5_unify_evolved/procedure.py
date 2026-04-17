@@ -77,7 +77,7 @@ def bb_should_fire(rc: Controller, sense: Sense):
         return sense.nearest_enemy_cheby_dist >= required_turns
     return True
 
-def is_getting_ammo(rc: Controller, sense: Sense, pos: Position):
+def is_getting_ammo(rc: Controller, sense: Sense, pos: Position, nopersonalecon=True):
     for d in CARDINAL_DIRECTIONS:
         p = pos.add(d)
         if not is_in_map(p, sense.map_width, sense.map_height): continue
@@ -90,6 +90,7 @@ def is_getting_ammo(rc: Controller, sense: Sense, pos: Position):
         bldg = rc.get_tile_building_id(p)
         dir = sense.get_direction(p)
         if bldg is None: continue
+        if nopersonalecon and sense.is_allied(p): continue
         if entt == EntityType.CONVEYOR          and dir == d.opposite() and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True
         if entt == EntityType.ARMOURED_CONVEYOR and dir == d.opposite() and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True
         if entt == EntityType.SPLITTER          and dir != d            and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True

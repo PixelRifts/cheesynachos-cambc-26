@@ -7,7 +7,7 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 from helpers import *
 
 priorities = {
-    EntityType.BUILDER_BOT: 9,
+    EntityType.BUILDER_BOT: 60,
     EntityType.CORE: 5,
     EntityType.GUNNER: 100,
     EntityType.SENTINEL: 100,
@@ -20,7 +20,7 @@ priorities = {
     EntityType.HARVESTER: -100,
     EntityType.FOUNDRY: 100,
     EntityType.ROAD: 1,
-    EntityType.BARRIER: 1,
+    EntityType.BARRIER: 8,
     EntityType.MARKER: 1,
 }
 

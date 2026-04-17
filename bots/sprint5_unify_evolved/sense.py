@@ -80,6 +80,7 @@ class Sense:
         self.ally_turrets: list[Position] = []
         self.enemy_transports: list[Position] = []
         self.ally_bridges: list[Position] = []
+        self.ally_conveyor: list[Position] = []
         self.ally_transports: list[Position] = []
         self.ores: list[Position] = []
         self.harvesters: list[Position] = []
@@ -197,6 +198,7 @@ class Sense:
         self.ally_turrets.clear()
         self.enemy_transports.clear()
         self.ally_bridges.clear()
+        self.ally_conveyor.clear()
         self.ally_transports.clear()
         self.ores.clear()
         self.harvesters.clear()
@@ -326,6 +328,8 @@ class Sense:
                 self.ally_transports.append(t)
                 if entt == EntityType.BRIDGE:
                     self.ally_bridges.append(t)
+                elif entt == EntityType.CONVEYOR:
+                    self.ally_conveyor.append(t)
 
     def _check_builder_bot(self, t):
         bb = self.rc.get_tile_builder_bot_id(t)

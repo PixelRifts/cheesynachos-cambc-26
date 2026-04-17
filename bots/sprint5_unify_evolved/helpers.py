@@ -21,6 +21,7 @@ ENTITY_DIRECTIONAL = { EntityType.CONVEYOR, EntityType.ARMOURED_CONVEYOR, Entity
 ENTITY_GUNNER_PASS = { None, EntityType.MARKER }
 
 ENTITY_INFRASTRUCTURE = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+ENTITY_INFRASTRUCTURE_RESOURCE_SINK = { EntityType.CORE, EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
 ENTITY_TURRET_REPLACABLE = { EntityType.BARRIER } | ENTITY_TRIVIAL
 ENTITY_VALID_BLOCKAGE_ANY = { EntityType.FOUNDRY, EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
 ENTITY_VALID_BLOCKAGE_FRIENDLY = { EntityType.FOUNDRY, EntityType.CORE } | ENTITY_TURRET | ENTITY_TRANSPORT
@@ -32,6 +33,10 @@ ENTITY_INVALID_ATTACK_FRIENDLY = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENT
 RESOURCE_ALLOWED_AMMO = { ResourceType.TITANIUM, ResourceType.REFINED_AXIONITE }
 ENVIRONMENT_ORE = { Environment.ORE_AXIONITE, Environment.ORE_TITANIUM }
 
+
+MAX_MAP_WIDTH = 50
+MAX_MAP_HEIGHT = 50
+MAX_MAP_SIZE = MAX_MAP_WIDTH * MAX_MAP_HEIGHT
 POSITION_GLOBAL_CACHE: list[Position] = [
     Position(i % MAX_MAP_WIDTH, i // MAX_MAP_WIDTH) for i in range(MAX_MAP_SIZE)
 ]
@@ -401,8 +406,3 @@ def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> P
     steps = min(steps_x, steps_y)
     if math.isinf(steps): return pos
     return Position(pos.x + dx * steps, pos.y + dy * steps)
-
-def fast_is_in_vision(w: int, me: int, t: int):
-    dx = (tile_idx % w)  - (player_idx % w)
-    dy = (tile_idx // w) - (player_idx // w)
-    return (dx*dx + dy*dy) <= 20

@@ -18,7 +18,7 @@ ENV_COSTS = {
 }
 
 # (Allied, Not Allied)
-ENTITY_COSTS = {
+ENTITY_COSTS_FAST = {
     None: (0, 0),
     EntityType.CORE: (0, 100000),
     EntityType.GUNNER: (100, 100000),
@@ -32,6 +32,24 @@ ENTITY_COSTS = {
     EntityType.HARVESTER: (400, 100000),
     EntityType.FOUNDRY: (400, 100000),
     EntityType.ROAD: (0, 0),
+    EntityType.BARRIER: (20, 100000),
+    EntityType.MARKER: (0, 1),
+}
+
+ENTITY_COSTS_CONVEYOR = {
+    None: (2, 2),
+    EntityType.CORE: (0, 100000),
+    EntityType.GUNNER: (100, 100000),
+    EntityType.SENTINEL: (100, 100000),
+    EntityType.BREACH: (100, 100000),
+    EntityType.LAUNCHER: (100, 100000),
+    EntityType.CONVEYOR: (2, 0),
+    EntityType.SPLITTER: (2, 0),
+    EntityType.ARMOURED_CONVEYOR: (2, 0),
+    EntityType.BRIDGE: (2, 0),
+    EntityType.HARVESTER: (400, 100000),
+    EntityType.FOUNDRY: (400, 100000),
+    EntityType.ROAD: (2, 0),
     EntityType.BARRIER: (20, 100000),
     EntityType.MARKER: (0, 1),
 }
@@ -102,7 +120,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_astar_internal(rc, sense, max_expansions=50, ignore_builder_at_tgt=ignore_builder_at_tgt)
+        step_astar_internal(rc, sense, max_expansions=200, ignore_builder_at_tgt=ignore_builder_at_tgt)
         pf_state.computed_this_turn = True
 
     if not pf_state.astar_active and pf_state.failed:
@@ -152,6 +170,11 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
     map_w = sense.map_width
     map_h = sense.map_height
 
+    my_pos = rc.get_position()
+    me_x   = my_pos.x
+    me_y   = my_pos.y
+    me_idx = me_x * map_w + me_y
+
     goal_pos = pf_state.goal
     goal_x   = goal_pos.x
     goal_y   = goal_pos.y
@@ -162,13 +185,14 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
     _get_entity            = sense.get_entity_idxd
     _is_allied             = sense.is_allied_idxd
     _turret_cost_map       = sense.turret_cost_map
-    # _is_in_vision          = fast_is_in_vision
+    _is_in_vision          = rc.is_in_vision
     _get_tile_builder      = rc.get_tile_builder_bot_id
     _ENV_WALL              = Environment.WALL
     _ENV_COSTS             = ENV_COSTS
-    _ENTITY_COSTS          = ENTITY_COSTS
+    _ENTITY_COSTS          = ENTITY_COSTS_FAST
     _heappop               = heappop
     _heappush              = heappush
+    _ignore_builder_at_tgt = ignore_builder_at_tgt
 
     best_h    = pf_state.best_h
     best_node = pf_state.best_node
@@ -183,7 +207,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
         ( 1,  1,  1 + map_w ),   # SE
         (-1,  1, -1 + map_w ),   # SW
     )
-
+    
     while open_set and expansions < max_expansions:
         _, current = _heappop(open_set)
         if current in closed_set:
@@ -230,6 +254,10 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
             if _is_seen(nxt):
                 env = _get_env(nxt)
                 if env == Environment.WALL: continue
+                
+                if not (_ignore_builder_at_tgt and nxt == goal):
+                    if _is_in_vision(POSITION_CACHE[nxt]) and _get_tile_builder(POSITION_CACHE[nxt]) is not None:
+                        continue
                 
                 entt   = _get_entity(nxt)
                 allied = _is_allied(nxt)
@@ -427,7 +455,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
-                        cost = ENTITY_COSTS[entt][0]
+                        cost = ENTITY_COSTS_CONVEYOR[entt][0]
                     else: continue
                 
             tentative = g_score[current] + cost
@@ -726,7 +754,7 @@ def cardinal_unit_virtually_navvable(rc: Controller, pos: Position, non_conveyor
         allied = rc.get_team(bldg) == rc.get_team()
         if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
             return True
-        if rc.get_entity_type(bldg) in ENTITY_TRANSPORT and allied:
+        if rc.get_entity_type(bldg) in ENTITY_TRANSPORT:
             return False
     
     return (rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos)
