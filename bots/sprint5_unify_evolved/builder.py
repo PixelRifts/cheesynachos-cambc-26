@@ -50,7 +50,7 @@ class BotState(Enum):
 
     RECOVER_GOTO_CORE = "Core"
 
-NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY, BotState.DEFENCE_STALKING }
 HEAL_EXCLUDE_STATES =        { BotState.ECON_CONNECT }
 MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 MICRO_DISRUPT_STATES =       { BotState.ATTACK_GOTO }
@@ -193,6 +193,7 @@ class BuilderBot(Bot):
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
                 self.healed_this_turn = True
+                self.stuck_counter -= 1
         elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
             if self.meta_nearest_heal():
                 return
@@ -448,7 +449,7 @@ class BuilderBot(Bot):
             my_pos = self.rc.get_position()
             
             if self.rc.get_position().distance_squared(to_heal) > GameConstants.ACTION_RADIUS_SQ:
-                pathfind.silly_pathfind_to(self.rc, to_heal)
+                pathfind.silly_pathfind_to(self.rc, self.sense, to_heal)
                 
                 if self.rc.get_position() != my_pos:
                     moved = True
@@ -758,7 +759,7 @@ class BuilderBot(Bot):
         else:
             # print('5')
             if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
-                pathfind.silly_pathfind_to(self.rc, self.econ_connect_past_pos)
+                pathfind.silly_pathfind_to(self.rc, self.sense, self.econ_connect_past_pos)
             else:
                 if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
                     self.econ_connect_past_pos = self.rc.get_position()
@@ -775,7 +776,7 @@ class BuilderBot(Bot):
         # print('basic pf')
         if not self.rc.is_in_vision(self.attack_target):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
-            # pathfind.silly_pathfind_to(self.rc, self.attack_target)
+            # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
         
         entt = self.sense.get_entity(self.attack_target)
@@ -869,7 +870,7 @@ class BuilderBot(Bot):
             # if self.defence_use_fast:
             #     pathfind.fast_pathfind_to(self.rc, self.sense, self.defence_current_target, ignore_builder_at_tgt=True)
             # else:
-            pathfind.silly_pathfind_to(self.rc, self.defence_current_target)
+            pathfind.silly_pathfind_to(self.rc, self.sense, self.defence_current_target)
 
     def defence_station(self):
         if self.sense.ally_builders > 3:
@@ -891,7 +892,7 @@ class BuilderBot(Bot):
                 rc.move(d)
                 return
 
-        pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.pathfind_target)
 
     def defence_stalk(self):
         try:
@@ -906,12 +907,12 @@ class BuilderBot(Bot):
                 self.switch_back_to_neutral(self.attack_return_to)
                 return
         
-        pathfind.silly_pathfind_to(self.rc, self.defence_stalking_pos)
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.defence_stalking_pos)
 
     # Healer
 
     def core_healer(self):
-        pathfind.silly_pathfind_to(self.rc, self.core_pos)
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
             
     # Attack
 
@@ -928,7 +929,7 @@ class BuilderBot(Bot):
         if should_astar:
             pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
         else:
-            pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+            pathfind.silly_pathfind_to(self.rc, self.sense, self.pathfind_target)
 
         # # Find econ crippling target
         # budget = min(1200, self.rc.get_cpu_time_elapsed() + 500)
@@ -1026,7 +1027,7 @@ class BuilderBot(Bot):
         pass
 
     def attack_exec_plan(self):
-        print(self.attack_plan, 'at', self.attack_target)
+        # print(self.attack_plan, 'at', self.attack_target)
         self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
         self.rc.draw_indicator_dot(self.attack_from, 0, 255, 0)
 
@@ -1042,7 +1043,7 @@ class BuilderBot(Bot):
         # print('basic pf')
         if not self.rc.is_in_vision(self.attack_target):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
-            # pathfind.silly_pathfind_to(self.rc, self.attack_target)
+            # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
 
         # Possibly broken logic but still trying
@@ -1102,12 +1103,12 @@ class BuilderBot(Bot):
             self.switch_back_to_neutral(self.attack_return_to)
             return
 
-        print('try destroy', self.attack_target, self.rc.get_cpu_time_elapsed())
+        # print('try destroy', self.attack_target, self.rc.get_cpu_time_elapsed())
         if entt == self.attack_plan or (allied and entt in ENTITY_ATTACK_NOREPLACE):
             self.switch_back_to_neutral(self.attack_return_to)
             return
         
-        print(get_ti_cost(self.rc, self.attack_plan))
+        # print(get_ti_cost(self.rc, self.attack_plan))
         if not try_destroy(self.rc, self.sense, self.attack_from, self.attack_target, \
             ti_min=get_ti_cost(self.rc, self.attack_plan)+20):
             if self.sense.get_entity(self.attack_target) == None: self.attack_plan_timeout += 1
@@ -1117,7 +1118,7 @@ class BuilderBot(Bot):
         if self.attack_plan in ENTITY_TURRET and self.attack_plan_dir is None:
             turret_dir = micro.compute_best_turret_dir(self.rc, self.sense, self.attack_target, self.attack_plan, self.enemy_core_pos)
 
-        print('attacker setup', self.attack_target)
+        # print('attacker setup', self.attack_target)
         match self.attack_plan:
             case EntityType.GUNNER:
                 if not self.rc.can_build_gunner(self.attack_target, turret_dir): return
@@ -1156,7 +1157,7 @@ class BuilderBot(Bot):
     def recover_goto_core(self):
         pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
 
-        if self.rc.get_position().distance_squared(self.core_pos) <= 3:
+        if self.rc.get_position().distance_squared(self.core_pos) <= 18:
             self.switch_to_econ()
             return
 
