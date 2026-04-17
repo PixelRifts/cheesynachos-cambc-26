@@ -32,10 +32,18 @@ class Sentinel(Bot):
         self.best_target = None
 
         self.attack_dmg = GameConstants.SENTINEL_DAMAGE
+        self.inactive_counter = 0
 
     def start_turn(self):
         self.best_target = None
 
+        if self.rc.get_ammo_amount() == 0:
+            self.inactive_counter += 1
+        else:
+            self.inactive_counter = 0
+        if self.inactive_counter > 50:
+            self.rc.self_destruct()
+        
         attackables = self.rc.get_attackable_tiles()
         priority = -100000
         for p in attackables:

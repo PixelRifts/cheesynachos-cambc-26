@@ -120,7 +120,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_astar_internal(rc, sense, max_expansions=200, ignore_builder_at_tgt=ignore_builder_at_tgt)
+        step_astar_internal(rc, sense, max_expansions=150, ignore_builder_at_tgt=ignore_builder_at_tgt)
         pf_state.computed_this_turn = True
 
     if not pf_state.astar_active and pf_state.failed:

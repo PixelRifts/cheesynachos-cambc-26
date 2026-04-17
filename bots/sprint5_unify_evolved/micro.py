@@ -27,19 +27,30 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
     is_empty = rc.is_tile_empty(poi)
     if is_empty: score += 100
 
+    # Axionite not secured penalty
+    roundnum = rc.get_current_round()
+    aggression = min(1.0, roundnum / 1000)
+    if sense.ax_trend() == 0.0:
+        aggression = aggression / 1.5
+
     # Core Distance Penalty
     if not is_empty:
-        r = rc.get_current_round()
-        aggression = min(1.0, r / 1000)
         dist = chebyshev_distance(poi, core_pos)
         dist_penalty = dist * 1 * (1 - aggression)
         if dist_penalty > 50: return 0, True
         score -= dist_penalty
 
+    # Hp loss penalty
     if not is_empty:
         expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
         if expected_hp_loss > rc.get_hp(): return 0, True
         score -= expected_hp_loss * 5
+
+    # Less HP
+    if not is_empty:
+        bbd = GameConstants.BUILDER_BOT_ATTACK_DAMAGE
+        ticks_required = (rc.get_hp(sense.tile_bldg_cache[poi]) + bbd - 1) // bbd
+        score -= ticks_required * 5
     
     for d in DIRECTIONS:
         p1 = poi.add(d)

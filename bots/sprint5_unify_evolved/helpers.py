@@ -406,3 +406,19 @@ def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> P
     steps = min(steps_x, steps_y)
     if math.isinf(steps): return pos
     return Position(pos.x + dx * steps, pos.y + dy * steps)
+
+def get_turret_tiles(rc: Controller, e: EntityType, p: Position, dir: Direction):
+    tiles = []
+    match e:
+        case EntityType.LAUNCHER: tiles.extend([p.add(d) for d in DIRECTIONS])
+        case EntityType.GUNNER:
+            for d in DIRECTIONS:
+                a = p.add(d)
+                tiles.append(a)
+                a = a.add(d)
+                tiles.append(a)
+                if d not in CARDINAL_DIRECTIONS: continue
+                a = a.add(d)
+                tiles.append(a)
+        case _: tiles.extend(rc.get_attackable_tiles_from(p, dir, e))
+    return tiles

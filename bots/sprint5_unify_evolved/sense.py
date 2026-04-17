@@ -79,8 +79,8 @@ class Sense:
         self.enemy_turrets: list[Position] = []
         self.ally_turrets: list[Position] = []
         self.enemy_transports: list[Position] = []
-        self.ally_bridges: list[Position] = []
-        self.ally_conveyor: list[Position] = []
+        self.bridges: list[Position] = []
+        self.conveyors: list[Position] = []
         self.ally_transports: list[Position] = []
         self.ores: list[Position] = []
         self.harvesters: list[Position] = []
@@ -197,8 +197,8 @@ class Sense:
         self.enemy_turrets.clear()
         self.ally_turrets.clear()
         self.enemy_transports.clear()
-        self.ally_bridges.clear()
-        self.ally_conveyor.clear()
+        self.bridges.clear()
+        self.conveyors.clear()
         self.ally_transports.clear()
         self.ores.clear()
         self.harvesters.clear()
@@ -316,6 +316,11 @@ class Sense:
         if entt == EntityType.HARVESTER:
             self.harvesters.append(t)
         
+        if entt == EntityType.BRIDGE:
+            self.bridges.append(t)
+        elif entt == EntityType.CONVEYOR:
+            self.conveyors.append(t)
+        
         if not allied:
             if entt in ENTITY_TURRET:
                 self.enemy_turrets.append(t)
@@ -326,10 +331,7 @@ class Sense:
                 self.ally_turrets.append(t)
             elif entt in ENTITY_TRANSPORT:
                 self.ally_transports.append(t)
-                if entt == EntityType.BRIDGE:
-                    self.ally_bridges.append(t)
-                elif entt == EntityType.CONVEYOR:
-                    self.ally_conveyor.append(t)
+                
 
     def _check_builder_bot(self, t):
         bb = self.rc.get_tile_builder_bot_id(t)
@@ -392,20 +394,7 @@ class Sense:
 
     # Turret Avoidance
     def add_turret_attack_costs(self, p: Position, e: EntityType, dir: Direction, mult: int):
-        tiles = []
-        match e:
-            case EntityType.LAUNCHER: tiles.extend([p.add(d) for d in DIRECTIONS])
-            case EntityType.GUNNER:
-                for d in DIRECTIONS:
-                    a = p.add(d)
-                    tiles.append(a)
-                    a = a.add(d)
-                    tiles.append(a)
-                    if d not in CARDINAL_DIRECTIONS: continue
-                    a = a.add(d)
-                    tiles.append(a)
-            case _: tiles.extend(self.rc.get_attackable_tiles_from(p, dir, e))
-        
+        tiles = get_turret_tiles(self.rc, e, p, dir)
         cost = TURRET_ATTACK_COSTS.get(e, 0) * mult
         for t in tiles:
             if not is_in_map(t, self.map_width, self.map_height): continue

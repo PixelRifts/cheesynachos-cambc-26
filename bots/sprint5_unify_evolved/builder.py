@@ -46,6 +46,7 @@ class BotState(Enum):
     ATTACK_BLOCK_ORE = "Block"
     ATTACK_HIJACK    = "Hijack"
     ATTACK_EXEC_PLAN = "Exec Plan"
+    ATTACK_STICK_AROUND = "Stick Around"
 
     RECOVER_GOTO_CORE = "Core"
 
@@ -53,11 +54,11 @@ NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotS
 HEAL_EXCLUDE_STATES =        { BotState.ECON_CONNECT }
 MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 MICRO_DISRUPT_STATES =       { BotState.ATTACK_GOTO }
-MICRO_FOLLOW_ENABLE_STATES = { BotState.ATTACK_GOTO, BotState.ECON_EXPLORE, BotState.ECON_RETURN }
+MICRO_FOLLOW_ENABLE_STATES = { BotState.ATTACK_GOTO, BotState.ECON_EXPLORE, BotState.ECON_RETURN, BotState.DEFENCE_TO_HARVESTER, BotState.DEFENCE_TO_CORE }
 
 ECON_STATES =                { BotState.ECON_EXPLORE, BotState.ECON_RETURN, BotState.ECON_TARGET, BotState.ECON_CONNECT, BotState.ECON_PLACE_FOUNDRY, BotState.ECON_REMOVE_FURTHER_FOUNDRIES, BotState.ECON_NUKE }
 DEFENCE_STATES =             { BotState.DEFENCE_TO_HARVESTER, BotState.DEFENCE_TO_CORE, BotState.DEFENCE_STATION }
-ATTACK_STATES =              { BotState.ATTACK_GOTO, BotState.ATTACK_BLOCK_ORE, BotState.ATTACK_HIJACK }
+ATTACK_STATES =              { BotState.ATTACK_GOTO, BotState.ATTACK_BLOCK_ORE, BotState.ATTACK_HIJACK, BotState.ATTACK_STICK_AROUND }
 
 class BuilderBot(Bot):
     def __init__(self, rc: Controller):
@@ -80,7 +81,8 @@ class BuilderBot(Bot):
         self.ore_queue = deque()
         self.ore_queue_set = set()
         self.defence_location = None
-        
+        self.healed_this_turn = False
+
         self.attack_disrupt_cache = {}
         self.attack_blacklist_queue: deque[(Position, int)] = deque()
         self.bridge_continue_blacklist: set[Position] = set()
@@ -190,6 +192,7 @@ class BuilderBot(Bot):
         if self.rc.get_hp() < self.rc.get_max_hp():
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
+                self.healed_this_turn = True
         elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
             if self.meta_nearest_heal():
                 return
@@ -199,7 +202,7 @@ class BuilderBot(Bot):
             if len(self.sense.enemy_turrets) != 0:
                 self.micro_destroy_turrets()
             elif len(self.sense.enemy_builders) != 0:
-                if not self.micro_try_attack() and self.state in MICRO_FOLLOW_ENABLE:
+                if not self.micro_try_attack() and self.state in MICRO_FOLLOW_ENABLE_STATES:
                     self.micro_follow_bot()
 
         match self.state:
@@ -260,7 +263,6 @@ class BuilderBot(Bot):
     # Meta
 
     def micro_should_station(self):
-        
         pass
 
     def micro_follow_bot(self):
@@ -312,15 +314,17 @@ class BuilderBot(Bot):
     def micro_try_attack(self) -> bool:
         is_aggressive = self.state in ATTACK_STATES|DEFENCE_STATES
         budget = self.rc.get_cpu_time_elapsed() + 500
-
+        
         harvesters = self.sense.harvesters
 
         best_poi = None
         best_score = -10000000
 
+        best_already_has_sentinel = False
         for h in harvesters:
             if self.sense.get_env(h) != Environment.ORE_TITANIUM: continue
 
+            already_has_sentinel = False
             count_turrets = 0
             for d in CARDINAL_DIRECTIONS:
                 p = h.add(d)
@@ -328,6 +332,7 @@ class BuilderBot(Bot):
                 if not self.rc.is_in_vision(p): continue
                 entt = self.sense.get_entity(p)
                 if entt in ENTITY_TURRET: count_turrets += 1
+                if entt == EntityType.SENTINEL: already_has_sentinel = True
 
             if count_turrets >= 2:
                 continue
@@ -347,7 +352,9 @@ class BuilderBot(Bot):
                 if score > best_score:
                     best_score = score
                     best_poi = p
+                    best_already_has_sentinel = already_has_sentinel
             if self.rc.get_cpu_time_elapsed() > budget: break
+            
         
         if self.rc.get_cpu_time_elapsed() < budget and is_aggressive:
             transports = self.sense.enemy_transports
@@ -365,11 +372,13 @@ class BuilderBot(Bot):
                 if score > best_score:
                     best_score = score
                     best_poi = c
+                    best_already_has_sentinel = False
                 if self.rc.get_cpu_time_elapsed() > budget: break
 
         if best_poi is not None:
             last_state = self.state
             target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, best_poi, self.enemy_core_pos)
+            plan = plan if best_already_has_sentinel else EntityType.SENTINEL
             self.switch_state(BotState.ATTACK_EXEC_PLAN)
             self.attack_target = target
             self.attack_plan = plan
@@ -447,6 +456,7 @@ class BuilderBot(Bot):
 
             if self.rc.can_heal(to_heal):
                 self.rc.heal(to_heal)
+                self.healed_this_turn = True
                 # no return - allow checks
 
             # my_pos = self.rc.get_position()
@@ -474,7 +484,7 @@ class BuilderBot(Bot):
 
         # Takeover logic
         budget = min(1300, self.rc.get_cpu_time_elapsed() + 100)
-        for b in self.sense.ally_bridges:
+        for b in self.sense.bridges:
             if not self.rc.is_in_vision(b): continue
             bldg = self.rc.get_tile_building_id(b)
             resource = self.rc.get_stored_resource(bldg)
@@ -495,7 +505,7 @@ class BuilderBot(Bot):
             if self.rc.get_cpu_time_elapsed() > budget:
                 print('breaking')
                 break
-        for b in self.sense.ally_conveyor:
+        for b in self.sense.conveyors:
             if not self.rc.is_in_vision(b): continue
             bldg = self.rc.get_tile_building_id(b)
             resource = self.rc.get_stored_resource(bldg)
@@ -554,7 +564,7 @@ class BuilderBot(Bot):
         if len(self.sense.enemy_turrets) != 0:
             self.micro_destroy_turrets()
         elif len(self.sense.enemy_builders) != 0:
-            if not self.micro_try_attack() and self.state in MICRO_FOLLOW_ENABLE:
+            if not self.micro_try_attack() and self.state in MICRO_FOLLOW_ENABLE_STATES:
                 self.micro_follow_bot()
 
         # Timeout to switch direction after BOT_EXPLORE_TIMEOUT time
@@ -1120,12 +1130,31 @@ class BuilderBot(Bot):
                 self.rc.build_barrier(self.attack_target)
 
         # print('done', self.attack_target)
-        self.switch_back_to_neutral(self.attack_return_to)
+        # self.switch_back_to_neutral(self.attack_return_to)
+        self.switch_state(BotState.ATTACK_STICK_AROUND)
+        self.attack_plan_timeout = 10
+
+    def attack_stick_around(self):
+        self.attack_plan_timeout -= 1
+        if self.healed_this_turn: self.attack_plan_timeout = 10
+        if self.attack_plan_timeout <= 0:
+            self.switch_back_to_neutral(BotState.ATTACK_GOTO)
+        
+        dirs = list(DIRECTIONS)
+        random.shuffle(dirs)
+        for d in dirs:
+            p = self.rc.get_position().add(d)
+            if rc.can_build_road(d):
+                rc.build_road(d)
+            if rc.can_move(d):
+                rc.move(d)
+                return
+        pass
 
     # Recovery
 
     def recover_goto_core(self):
-        pathfind.silly_pathfind_to(self.rc, self.core_pos)
+        pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
 
         if self.rc.get_position().distance_squared(self.core_pos) <= 3:
             self.switch_to_econ()
@@ -1201,53 +1230,55 @@ class BuilderBot(Bot):
         start = self.rc.get_position()
         target_tiles = self.core_tiles
         
-        # Prioritize Target Tiles
+        TARGET_DIST_W = 1.0
+        FOUNDRY_DIST_W = 1.0
+        TILE_DIST_W = 1.0
+        TILE_TRANSPORT_BONUS = 0.0
+
         if not is_ax:
-            best_final_target_dist = 100000000
+            best_score = float('-inf')
             best_final_target_tile: Position = None
-            filled_ct = []
             for ct in target_tiles:
-                if start.distance_squared(ct) <= GameConstants.BRIDGE_TARGET_RADIUS_SQ:
-                    if not self.rc.is_in_vision(ct): continue
-                    d = start.distance_squared(ct)
-                    if d < best_final_target_dist:
-                        best_final_target_dist = d
-                        best_final_target_tile = ct
+                if start.distance_squared(ct) > GameConstants.BRIDGE_TARGET_RADIUS_SQ: continue
+                if not self.rc.is_in_vision(ct): continue
+                score = -TARGET_DIST_W * start.distance_squared(ct)
+                if score > best_score:
+                    best_score = score
+                    best_final_target_tile = ct
             if best_final_target_tile is not None:
                 print('directly to target ', best_final_target_tile)
                 return (best_final_target_tile, True)
 
-        # IF AXIONITE, PRIORITIZE MERGING USING FOUNDRY
+            # for t in self.sense.nearby_tiles:
+            #     if start.distance_squared(t) != 1: continue
+            #     entt = self.sense.get_entity(t)
+            #     if entt not in ENTITY_TRANSPORT: continue
+            #     bldg = self.rc.get_tile_building_id(t)
+            #     if self.rc.get_stored_resource(bldg) is not None: continue
+            #     print('merge one tile away ', t)
+            #     return (t, True)
+        
         if is_ax:
             best = None
-            best_dist = float('inf')
-            build_finish = False
-            transports = self.sense.ally_transports
-            for t in transports:
+            best_score = float('-inf')
+            for t in self.sense.ally_transports:
                 if start.distance_squared(t) > GameConstants.BRIDGE_TARGET_RADIUS_SQ: continue
-
-                entt = self.sense.get_entity(t)
-                if entt != EntityType.CONVEYOR: continue
+                if self.sense.get_entity(t) != EntityType.CONVEYOR: continue
                 bldg = self.rc.get_tile_building_id(t)
                 if self.rc.get_stored_resource(bldg) != ResourceType.TITANIUM: continue
-
-                d = dist_to_nearest_target(t, target_tiles)
-                if d < best_dist:
-                    best_dist = d
+                score = -FOUNDRY_DIST_W * dist_to_nearest_target(t, target_tiles)
+                if score > best_score:
+                    best_score = score
                     best = t
-
             if best is not None:
                 print('merge using foundry ', best)
                 return (best, True)
         
-        # Try all other tiles
         best = None
-        best_dist = float('inf')
-        build_finish = False
+        best_score = float('-inf')
         best_is_to_transport = False
         for t in self.sense.nearby_tiles:
             if start.distance_squared(t) > GameConstants.BRIDGE_TARGET_RADIUS_SQ: continue
-
             is_to_transport = False
             env = self.sense.get_env(t)
             allied = self.sense.is_allied(t)
@@ -1257,18 +1288,16 @@ class BuilderBot(Bot):
             if allied:
                 if entt in ENTITY_TRANSPORT:
                     resource = self.rc.get_stored_resource_id(self.rc.get_tile_building_id(t))
-                    if (not is_ax and resource is not None) or (is_ax and resource != ResourceType.TITANIUM ):
+                    if (not is_ax and resource is not None) or (is_ax and resource != ResourceType.TITANIUM):
                         continue
                     else:
                         is_to_transport = True
                 elif entt not in ENTITY_TRIVIAL:
                     continue
-
             if t in self.sense.ally_builders: continue
-
-            d = dist_to_nearest_target(t, target_tiles)
-            if d < best_dist:
-                best_dist = d
+            score = -TILE_DIST_W * dist_to_nearest_target(t, target_tiles) + TILE_TRANSPORT_BONUS * is_to_transport
+            if score > best_score:
+                best_score = score
                 best = t
                 best_is_to_transport = is_to_transport
 
@@ -1276,6 +1305,87 @@ class BuilderBot(Bot):
             print('intermediate ', best)
             return (best, best_is_to_transport)
         return (None, False)
+
+    def astar_test_heuristic(self, start: Position, end: Position, cutoff: int) -> bool:
+        if start == end:
+            return False
+
+        map_w = self.sense.map_width
+        map_h = self.sense.map_height
+
+        start_x, start_y = start.x, start.y
+        end_x,   end_y   = end.x,   end.y
+
+        adx = abs(start_x - end_x)
+        ady = abs(start_y - end_y)
+        if (adx if adx > ady else ady) > cutoff:
+            return True
+
+        start_flat = start_y * map_w + start_x
+        end_flat   = end_y   * map_w + end_x
+
+        _get_env          = self.sense.get_env
+        _get_entity       = self.sense.get_entity
+        _is_allied        = self.sense.is_allied
+        _is_in_vision     = self.rc.is_in_vision
+        _get_tile_builder = self.rc.get_tile_builder_bot_id
+        _WALL             = Environment.WALL
+        _UNWALKABLE       = ENTITY_UNWALKABLE
+        _TRANSPORT        = ENTITY_TRANSPORT
+
+        DIR_TABLE = (
+            ( 0, -1, -map_w     ),
+            ( 0,  1,  map_w     ),
+            ( 1,  0,  1         ),
+            (-1,  0, -1         ),
+            ( 1, -1,  1 - map_w ),
+            (-1, -1, -1 - map_w ),
+            ( 1,  1,  1 + map_w ),
+            (-1,  1, -1 + map_w ),
+        )
+
+        heap    = [(adx if adx > ady else ady, 0, start_flat)]
+        visited = {start_flat: 0}
+
+        while heap:
+            f, g, pos = heapq.heappop(heap)
+            if g > cutoff:
+                continue
+            if pos == end_flat:
+                return False
+
+            px = pos % map_w
+            py = pos // map_w
+
+            for dx, dy, d_delta in DIR_TABLE:
+                ng = g + 1
+                if ng > cutoff: continue
+
+                nxt_x = px + dx
+                nxt_y = py + dy
+                if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h: continue
+
+                nxt = pos + d_delta
+
+                env  = _get_env(nxt)
+                if env == _WALL: continue
+                entt = _get_entity(nxt)
+                if entt in _UNWALKABLE: continue
+                allied = _is_allied(nxt)
+                if allied and entt in _TRANSPORT and nxt != end_flat: continue
+                if _is_in_vision(POSITION_CACHE[nxt]) and _get_tile_builder(POSITION_CACHE[nxt]) is not None: continue
+
+                if nxt in visited and visited[nxt] <= ng:
+                    continue
+
+                visited[nxt] = ng
+
+                hdx = abs(nxt_x - end_x)
+                hdy = abs(nxt_y - end_y)
+                h   = hdx if hdx > hdy else hdy
+                heapq.heappush(heap, (ng + h, ng, nxt))
+
+        return True
 
     def should_bridge_heuristic(self, start: Position, end: Position, cutoff: int) -> bool:
         if start == end or is_adjacent(start, end): return False
