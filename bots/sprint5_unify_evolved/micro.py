@@ -10,35 +10,51 @@ from procedure import *
 
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants, ResourceType
 
-DISTANCE_SCORE_LUT = [ 30, 20, 15, 12, 10 ]
-
 ENTITY_MICRO_USE_GUNNERS_TO_DISABLE = { EntityType.CORE } | ENTITY_TURRET
 
-# Unused
-def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int, bool):
+
+DISTANCE_SCORE_LUT = [ 30, 20, 15, 12, 10 ]
+
+
+def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos: Position) -> (int, bool):
     my_pos = rc.get_position()
     score = 0
     
     # TODO: Change to A* path length
     distance_index = min(chebyshev_distance(my_pos, poi), len(DISTANCE_SCORE_LUT) - 1)
     score += DISTANCE_SCORE_LUT[distance_index]
-    
-    expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
-    if expected_hp_loss > rc.get_hp(): return 0, True
-    score -= expected_hp_loss
+
+    is_empty = rc.is_tile_empty(poi)
+    if is_empty: score += 100
+
+    # Core Distance Penalty
+    if not is_empty:
+        r = rc.get_current_round()
+        aggression = min(1.0, r / 1000)
+        dist = chebyshev_distance(poi, core_pos)
+        dist_penalty = dist * 1 * (1 - aggression)
+        if dist_penalty > 50: return 0, True
+        score -= dist_penalty
+
+    if not is_empty:
+        expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
+        if expected_hp_loss > rc.get_hp(): return 0, True
+        score -= expected_hp_loss * 5
     
     for d in DIRECTIONS:
         p1 = poi.add(d)
         if not is_in_map(p1, sense.map_width, sense.map_height): continue
         if sense.get_env(p1) == Environment.WALL: continue
+        if sense.get_entity(p1) == EntityType.HARVESTER: continue
         if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1): score += 10
-        if p1 in sense.enemy_builders: score += 10
+        if p1 in sense.enemy_builders: score += 20
         
         p2 = p1.add(d)
         if not is_in_map(p2, sense.map_width, sense.map_height): continue
         if sense.get_env(p2) == Environment.WALL: continue
+        if sense.get_entity(p2) == EntityType.HARVESTER: continue
         if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
-        if p2 in sense.enemy_builders: score += 10
+        if p2 in sense.enemy_builders: score += 20
         
         if d not in CARDINAL_DIRECTIONS: continue
         
@@ -65,6 +81,9 @@ def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position, enemy_cor
         if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1):
             selected_entity = EntityType.GUNNER
             break
+        if p1 in sense.enemy_builders:
+            selected_entity = EntityType.GUNNER
+            break
         
         p2 = p1.add(d)
         if not is_in_map(p2, sense.map_width, sense.map_height): continue
@@ -72,7 +91,10 @@ def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position, enemy_cor
         if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2):
             selected_entity = EntityType.GUNNER
             break
-
+        if p2 in sense.enemy_builders:
+            selected_entity = EntityType.GUNNER
+            break
+        
         if d not in CARDINAL_DIRECTIONS: continue
         
         p3 = p2.add(d)
@@ -84,9 +106,9 @@ def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position, enemy_cor
 
     # When barriers are included here, uncomment this
     # if selected_entity in ENTITY_TURRET:
-    selected_entity_dir = compute_best_turret_dir(rc, sense, poi, selected_entity, enemy_core_pos)
+    # selected_entity_dir = compute_best_turret_dir(rc, sense, poi, selected_entity, enemy_core_pos)
 
-    return target_pos, replace_from, selected_entity, selected_entity_dir
+    return target_pos, replace_from, selected_entity, None
 
 PRIORITIES = {
     None: 0,
@@ -128,13 +150,20 @@ def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, e
         attackables = rc.get_attackable_tiles_from(poi, d, entt)
         score = 0
         for t in attackables:
-            if sense.is_allied(t): continue
-            score += PRIORITIES[sense.get_entity(t)]
+            rc.draw_indicator_dot(t, 255, 0,0)
+            
+            tentt = sense.get_entity(t)
+            if not sense.is_allied(t) and tentt is not None:
+                score += PRIORITIES[tentt]
+                print('added ', tentt, t)
+            
             if rc.is_in_vision(t):
                 bb = rc.get_tile_builder_bot_id(t)
-                if bb is not None:
-                    score += PRIORITIES[EntityType.BUILDER_BOT] * (1 if rc.get_team(bb) == rc.get_team() else -1)
-        
+                if bb is not None and rc.get_team(bb) != rc.get_team():
+                    score += PRIORITIES[EntityType.BUILDER_BOT]
+                    print('added ', bb, t)
+            
+        print(d, score)
         if score < 20: continue
         if score > max_dir_score:
             max_dir_score = score

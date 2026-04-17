@@ -21,7 +21,7 @@ PRIORITIES = {
     EntityType.HARVESTER: -100,
     EntityType.FOUNDRY: 100,
     EntityType.ROAD: 1,
-    EntityType.BARRIER: 1,
+    EntityType.BARRIER: 8,
     EntityType.MARKER: 1,
 }
 
@@ -30,34 +30,35 @@ class Gunner(Bot):
         super().__init__(rc)
         self.best_target = None
         self.attack_dmg = GameConstants.SENTINEL_DAMAGE
+        self.inactive_counter = 0
 
     def is_path_clear(self, target_pos: Position) -> bool:
-      my_pos = self.rc.get_position()
-    
-      # Determine the direction of movement per axis(-1, 0, or 1)
-      def get_step(start, end):
-          if start == end: return 0
-          return 1 if end > start else -1
+        my_pos = self.rc.get_position()
+        
+        # Determine the direction of movement per axis(-1, 0, or 1)
+        def get_step(start, end):
+            if start == end: return 0
+            return 1 if end > start else -1
 
-      step_x = get_step(my_pos.x, target_pos.x)
-      step_y = get_step(my_pos.y, target_pos.y)
-      dist = max(abs(target_pos.x - my_pos.x), abs(target_pos.y - my_pos.y))
-      for i in range(1, dist): 
-          check_x = my_pos.x + (i * step_x)
-          check_y = my_pos.y + (i * step_y)
-          p = Position(check_x, check_y)
+        step_x = get_step(my_pos.x, target_pos.x)
+        step_y = get_step(my_pos.y, target_pos.y)
+        dist = max(abs(target_pos.x - my_pos.x), abs(target_pos.y - my_pos.y))
+        for i in range(1, dist): 
+            check_x = my_pos.x + (i * step_x)
+            check_y = my_pos.y + (i * step_y)
+            p = Position(check_x, check_y)
 
-          bid = self.rc.get_tile_building_id(p)
-          env = self.rc.get_tile_env(p)
-          if env == Environment.WALL:
-              return False
-          if bid is not None:
-              ent_type = self.rc.get_entity_type(bid)
-              # print(ent_type)
-              if ent_type not in [EntityType.ROAD, EntityType.MARKER]:
-                  return False
+            bid = self.rc.get_tile_building_id(p)
+            env = self.rc.get_tile_env(p)
+            if env == Environment.WALL:
+                return False
+            if bid is not None:
+                ent_type = self.rc.get_entity_type(bid)
+                # print(ent_type)
+                if ent_type not in [EntityType.ROAD, EntityType.MARKER]:
+                    return False
 
-      return True
+        return True
 
     def get_best_in_range(self, candidates):
         best_tile = None
@@ -87,6 +88,13 @@ class Gunner(Bot):
     def start_turn(self):
         # Reset target at the start of every turn to avoid stale data
         self.best_target = None
+        
+        if self.rc.get_ammo_amount() == 0:
+            self.inactive_counter += 1
+        else:
+            self.inactive_counter = 0
+        if self.inactive_counter > 50:
+            self.rc.self_destruct()
         
         best_overall_priority = -float('inf')
         best_direction = None

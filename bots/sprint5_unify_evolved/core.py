@@ -37,9 +37,7 @@ class Core(Bot):
             ti, ax = self.rc.get_global_resources()
 
         print(len(self.active_rescue_ops))
-        
         self.ti_tracker.append(ti)
-
         self.ore_dir = None
 
         for t in self.rc.get_nearby_tiles():
@@ -59,18 +57,18 @@ class Core(Bot):
 
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
-        if self.healer_needed() or (self.sees_enemy_builder_bot() and self.healer_count < 1):
+        if self.healer_needed() or (self.healer_count < 1):
             if self.healer_needed(): print("Healer needed!")
             else: print("Enemy builder bot spotted!")
             self.spawn_healer()
         
-        target = 4 + turn // 50
+        target = 3 + turn // 50
         # if self.rc.get_current_round() > 50: target = 4 + turn // 80
         # if self.ti_tracker[-1] > 2000: target = 8 + turn // 80
         # target = 1
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:
-            if self.econ_count <= self.rush_count:
+            if self.econ_count <= 2*self.rush_count:
                 self.spawn_econ()
                 return
             if not self.spawn_rush():
@@ -130,7 +128,7 @@ class Core(Bot):
             #         effective_hp += 4
 
             hp_threshold = 9 if bldg in self.active_rescue_ops else 13  # DONOT CHANGE !!!
-            if hp < hp_threshold:
+            if hp < min(hp_threshold, self.rc.get_max_hp(bldg)):
                 self.mark_rescue_operation(bldg)
                 return True
 

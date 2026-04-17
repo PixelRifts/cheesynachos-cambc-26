@@ -21,8 +21,9 @@ ENTITY_DIRECTIONAL = { EntityType.CONVEYOR, EntityType.ARMOURED_CONVEYOR, Entity
 ENTITY_GUNNER_PASS = { None, EntityType.MARKER }
 
 ENTITY_INFRASTRUCTURE = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+ENTITY_INFRASTRUCTURE_RESOURCE_SINK = { EntityType.CORE, EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
 ENTITY_TURRET_REPLACABLE = { EntityType.BARRIER } | ENTITY_TRIVIAL
-ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
+ENTITY_VALID_BLOCKAGE_ANY = { EntityType.FOUNDRY, EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
 ENTITY_VALID_BLOCKAGE_FRIENDLY = { EntityType.FOUNDRY, EntityType.CORE } | ENTITY_TURRET | ENTITY_TRANSPORT
 ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } # | ENTITY_TRANSPORT
 
@@ -31,7 +32,16 @@ ENTITY_INVALID_ATTACK_FRIENDLY = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENT
 
 RESOURCE_ALLOWED_AMMO = { ResourceType.TITANIUM, ResourceType.REFINED_AXIONITE }
 ENVIRONMENT_ORE = { Environment.ORE_AXIONITE, Environment.ORE_TITANIUM }
-    
+
+
+MAX_MAP_WIDTH = 50
+MAX_MAP_HEIGHT = 50
+MAX_MAP_SIZE = MAX_MAP_WIDTH * MAX_MAP_HEIGHT
+POSITION_GLOBAL_CACHE: list[Position] = [
+    Position(i % MAX_MAP_WIDTH, i // MAX_MAP_WIDTH) for i in range(MAX_MAP_SIZE)
+]
+POSITION_CACHE: list[Position] = []
+
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
 
@@ -105,7 +115,7 @@ def is_pos_conveyorable(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     allied = rc.get_team() == rc.get_team(bldg)
     entt = rc.get_entity_type(bldg)
-    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL)
+    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL) or (allied and entt == EntityType.BARRIER)
 
 def is_pos_editable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return True
@@ -201,6 +211,25 @@ def get_best_pathable_adj_with_diag(rc: Controller, pos: Position, heu: Position
     best_dist = 1000000
     best_dir = Direction.CENTRE
     for d in DIRECTIONS:
+        p = pos.add(d)
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        
+        if not is_pos_pathable(rc, p): continue
+        # if is_friendly_transport(rc, p): continue
+        bb = rc.get_tile_builder_bot_id(p)
+        if bb is not None: continue
+        dist = p.distance_squared(heu)
+        if dist < best_dist:
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
+def get_best_pathable_adj_with_diag_excluding(rc: Controller, pos: Position, heu: Position, dir_to_exclude: Direction) -> Direction:
+    best_dist = 1000000
+    best_dir = Direction.CENTRE
+    for d in DIRECTIONS:
+        if d == dir_to_exclude: continue
         p = pos.add(d)
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue

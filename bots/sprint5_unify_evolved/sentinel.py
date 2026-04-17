@@ -20,7 +20,7 @@ priorities = {
     EntityType.HARVESTER: -100,
     EntityType.FOUNDRY: 100,
     EntityType.ROAD: 1,
-    EntityType.BARRIER: 1,
+    EntityType.BARRIER: 8,
     EntityType.MARKER: 1,
 }
 
