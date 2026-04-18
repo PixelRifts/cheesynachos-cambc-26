@@ -1,5 +1,5 @@
 import sys
-from procedure import bb_should_fire
+from procedure import bb_should_fire, is_protecting_conveyor
 
 from sense import Sense
 from helpers import *
@@ -450,9 +450,11 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 allied = sense.is_allied(nxt)
                 if env == Environment.WALL: continue
                 if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != goal: continue
-                if allied and (entt == EntityType.CONVEYOR or entt == EntityType.BRIDGE or \
+                if allied and (entt == EntityType.BRIDGE or \
                     entt == EntityType.SPLITTER or entt == EntityType.ARMOURED_CONVEYOR) and nxt != goal: continue
-
+                if allied and entt == EntityType.CONVEYOR:
+                    if (not is_protecting_conveyor(rc, sense, nxt) and nxt != goal): continue
+                
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
                         cost = ENTITY_COSTS_CONVEYOR[entt][0]
@@ -775,7 +777,8 @@ def cardinal_unit_virtually_navvable(rc: Controller, pos: Position, non_conveyor
         if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
             return True
         if rc.get_entity_type(bldg) in ENTITY_TRANSPORT:
-            return False
+            if not is_protecting_conveyor_simple(rc, pos):
+                return False
     
     return (rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos)
 
