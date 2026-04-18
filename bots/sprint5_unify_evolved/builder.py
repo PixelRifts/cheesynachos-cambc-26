@@ -199,7 +199,6 @@ class BuilderBot(Bot):
         elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
             if self.meta_nearest_heal():
                 return
-        
 
         if self.state not in MICRO_EXCLUDE_STATES:
             if len(self.sense.enemy_turrets) != 0:
@@ -348,7 +347,7 @@ class BuilderBot(Bot):
                 if p in self.sense.ally_builders: continue
                 if p in self.sense.enemy_builders: continue
                 if not self.rc.is_in_vision(p): continue
-                if not is_pos_turretable(self.rc, p): continue
+                if not is_pos_turretable(self.rc, p) and not is_protecting_conveyor(self.rc, self.sense, p): continue
 
                 score, skip = micro.score_attack_poi(self.rc, self.sense, p, self.core_pos)
                 if skip: continue
@@ -370,6 +369,7 @@ class BuilderBot(Bot):
                 if not self.rc.is_in_vision(c): continue
                 bldg = self.rc.get_tile_building_id(c)
                 if self.rc.get_stored_resource(bldg) not in RESOURCE_ALLOWED_AMMO: continue
+                
                 score, skip = micro.score_attack_poi(self.rc, self.sense, c, self.core_pos)
                 if skip: continue
                 if score > best_score:
@@ -404,7 +404,7 @@ class BuilderBot(Bot):
                 if self.sense.get_entity(p1) == EntityType.GUNNER:
                     already_targeted = True
                     break
-                if is_getting_ammo(self.rc, self.sense, p1) and is_pos_turretable(self.rc, p1):
+                if is_getting_ammo(self.rc, self.sense, p1) and (is_pos_turretable(self.rc, p1) or is_protecting_conveyor(self.rc, self.sense, p1)):
                     candidate_dir = d
                     turret_candidate = t
             if turret_candidate is not None: break
@@ -456,7 +456,7 @@ class BuilderBot(Bot):
                 if self.rc.get_position() != my_pos:
                     moved = True
                 # no return - allow immediate heal
-
+            
             if self.rc.can_heal(to_heal):
                 self.rc.heal(to_heal)
                 self.healed_this_turn = True
@@ -1100,16 +1100,18 @@ class BuilderBot(Bot):
         # print('poi update check')
         entt = self.sense.get_entity(self.attack_target)
         allied = self.sense.is_allied(self.attack_target)
-        if not is_pos_turretable(self.rc, self.attack_target):
+        
+        invalid = not is_pos_turretable(self.rc, self.attack_target)
+        if invalid:
             # print(self.attack_target, 'stuff done here')
             expiry = self.rc.get_current_round() + 100
             self.attack_blacklist_queue.append((self.attack_target, expiry))
             self.attack_blacklist_set.add(self.attack_target)
             self.switch_back_to_neutral(self.attack_return_to)
             return
-
+        
         # print('uneditable check', self.attack_target, self.rc.get_cpu_time_elapsed())
-        if not is_pos_turretable(self.rc, self.attack_target) or self.attack_target in self.sense.ally_builders or self.attack_target in self.sense.enemy_builders:
+        if invalid or (self.attack_target in self.sense.ally_builders) or self.attack_target in self.sense.enemy_builders:
             # print(self.attack_target, 'is uneditable')
             self.switch_back_to_neutral(self.attack_return_to)
             return
