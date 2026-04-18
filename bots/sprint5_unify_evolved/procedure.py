@@ -96,3 +96,9 @@ def is_getting_ammo(rc: Controller, sense: Sense, pos: Position, nopersonalecon=
         if entt == EntityType.SPLITTER          and dir != d            and rc.get_stored_resource(bldg) in RESOURCE_ALLOWED_AMMO: return True
 
     return False
+
+def is_protecting_conveyor(rc: Controller, sense: Sense, pos: Position) -> bool:
+    going_to = pos.add(sense.get_direction(pos))
+    if not sense.is_seen(going_to): return True
+    if sense.get_entity(going_to) == EntityType.HARVESTER: return True
+    return False

@@ -115,7 +115,16 @@ def is_pos_conveyorable(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     allied = rc.get_team() == rc.get_team(bldg)
     entt = rc.get_entity_type(bldg)
-    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL) or (allied and entt == EntityType.BARRIER)
+    return (not allied and entt in ENTITY_TRANSPORT) or (entt in ENTITY_TRIVIAL) or (allied and (entt == EntityType.BARRIER or is_protecting_conveyor_simple(rc, pos)))
+
+def is_protecting_conveyor_simple(rc: Controller, pos: Position) -> bool:
+    bldg = rc.get_tile_building_id(pos)
+    if rc.get_entity_type(bldg) != EntityType.CONVEYOR: return False
+    going_to = pos.add(rc.get_direction(bldg))
+    if not rc.is_in_vision(going_to): return True
+    going_bldg = rc.get_tile_building_id(going_to)
+    if going_bldg == None or rc.get_entity_type(going_bldg) != EntityType.HARVESTER: return False
+    return True
 
 def is_pos_editable(rc: Controller, pos: Position) -> bool:
     if rc.is_tile_empty(pos): return True
@@ -169,7 +178,6 @@ def is_enemy_transport(rc: Controller, pos: Position) -> bool:
     allied = rc.get_team(bldg) == rc.get_team()
     entt = rc.get_entity_type(bldg)
     return not allied and entt in ENTITY_TRANSPORT
-
 
 # Adjacency Stuff
 
@@ -267,7 +275,8 @@ def get_best_empty_adj(rc: Controller, a: Position, b: Position) -> Direction:
         # bb = rc.get_tile_builder_bot_id(p)
         # if bb is not None and rc.get_id(): continue
 
-        score = -p.distance_squared(b) + (-100 if rc.get_entity_type(rc.get_tile_building_id(p)) == EntityType.BARRIER else 0)
+        score = -p.distance_squared(b) 
+        score += (-100 if rc.get_entity_type(rc.get_tile_building_id(p)) == EntityType.BARRIER else 0)
         if score > best_score:
             best_score = score
             best_dir = d

@@ -28,7 +28,7 @@ class BotJob(Enum):
 
 class BotState(Enum):
     ECON_EXPLORE = "Explore"
-    ECON_RETURN = "ReturnTo"
+    ECON_RETURN  = "ReturnTo"
     ECON_TARGET  = "Target"
     ECON_CONNECT = "Connect"
     ECON_PLACE_FOUNDRY = "Place Foundry"
@@ -50,7 +50,7 @@ class BotState(Enum):
 
     RECOVER_GOTO_CORE = "Core"
 
-NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY, BotState.DEFENCE_STALKING }
 HEAL_EXCLUDE_STATES =        { BotState.ECON_CONNECT }
 MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 MICRO_DISRUPT_STATES =       { BotState.ATTACK_GOTO }
@@ -80,6 +80,7 @@ class BuilderBot(Bot):
         self.foundry_locked = set()
         self.ore_queue = deque()
         self.ore_queue_set = set()
+        self.current_protector_set = []
         self.defence_location = None
         self.healed_this_turn = False
 
@@ -118,6 +119,7 @@ class BuilderBot(Bot):
         # ECON_TARGET
         self.econ_target_ore: Position = None
         self.econ_target_is_ax: bool = False
+        self.current_protector_set.clear()
         
         # ECON_CONNECT
         self.econ_connect_final_target: Position = None
@@ -193,6 +195,7 @@ class BuilderBot(Bot):
             if self.rc.can_heal(self.rc.get_position()):
                 self.rc.heal(self.rc.get_position())
                 self.healed_this_turn = True
+                self.stuck_counter -= 1
         elif len(self.sense.heal_targets) != 0 and self.state not in HEAL_EXCLUDE_STATES:
             if self.meta_nearest_heal():
                 return
@@ -448,7 +451,7 @@ class BuilderBot(Bot):
             my_pos = self.rc.get_position()
             
             if self.rc.get_position().distance_squared(to_heal) > GameConstants.ACTION_RADIUS_SQ:
-                pathfind.silly_pathfind_to(self.rc, to_heal)
+                pathfind.silly_pathfind_to(self.rc, self.sense, to_heal)
                 
                 if self.rc.get_position() != my_pos:
                     moved = True
@@ -600,9 +603,10 @@ class BuilderBot(Bot):
     def econ_target(self):
         # Make sure there aren't new developments concerning the ore
         # print('confirm status')
-        should_connect, direction = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax)
+        should_connect, direction = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax, True)
         if not should_connect or direction == Direction.CENTRE:
             self.switch_to_econ()
+            print("switched ere 1", should_connect, direction)
             return
         self.pathfind_target = self.econ_target_ore.add(direction)
 
@@ -612,14 +616,16 @@ class BuilderBot(Bot):
             if pathfind.pf_state.failed:
                 self.harvester_blacklist.add(self.econ_target_ore)
                 self.switch_to_econ()
+                print("switched ere 2")
             return
         ore_has = self.sense.get_entity(self.econ_target_ore)
 
         # Validate Walls
         valid_count = 0
-        should_turret = len(self.sense.enemy_transports) > 4 or len(self.sense.enemy_builders) > 2 or self.sense.ti_tracker[-1] > 500
+        should_turret = len(self.sense.enemy_transports) > 4 or len(self.sense.enemy_builders) > 2 or self.sense.ti_tracker[-1] > 1000
         should_turret = should_turret and not self.econ_target_is_ax
-        the_entt_to_use = EntityType.SENTINEL if should_turret else EntityType.BARRIER
+        the_entt_to_use = EntityType.SENTINEL if should_turret else EntityType.CONVEYOR
+
         for d in self.shuffled_cardinal_directions:
             adj = self.econ_target_ore.add(d)
 
@@ -629,22 +635,24 @@ class BuilderBot(Bot):
                 continue
             # if not self.rc.is_in_vision(adj): continue
 
-            entt = self.sense.get_entity(adj)
-            allied = self.sense.is_allied(adj)
-            env = self.sense.get_env(adj)
+            adjidx = self.sense.idx(adj)
+            entt = self.sense.get_entity_idxd(adjidx)
+            allied = self.sense.is_allied_idxd(adjidx)
+            env = self.sense.get_env_idxd(adjidx)
 
             if env == Environment.WALL or \
                 (entt in ENTITY_VALID_BLOCKAGE_ANY) or \
                 (allied and entt in ENTITY_VALID_BLOCKAGE_FRIENDLY):
-                if allied and entt == EntityType.SENTINEL: the_entt_to_use = EntityType.BARRIER
+                if allied and entt == EntityType.SENTINEL: the_entt_to_use = EntityType.CONVEYOR
                 valid_count += 1
             else:
                 goto = self.econ_target_ore if ore_has in ENTITY_WALKABLE else adj.add(get_best_empty_adj(self.rc, adj, self.core_pos))
                 
                 if try_destroy(self.rc, self.sense, goto, adj, ti_min=get_ti_cost(self.rc, the_entt_to_use)):
-                    dir = micro.compute_best_turret_dir(self.rc, self.sense, adj, the_entt_to_use, self.enemy_core_pos) if the_entt_to_use != EntityType.BARRIER else None
+                    dir = micro.compute_best_turret_dir(self.rc, self.sense, adj, the_entt_to_use, self.enemy_core_pos) if the_entt_to_use != EntityType.CONVEYOR else d.opposite()
                     if self.rc.can_build(the_entt_to_use, adj, dir):
                         self.rc.build(the_entt_to_use, adj, dir)
+                        if the_entt_to_use == EntityType.CONVEYOR: self.current_protector_set.append(adj)
                         valid_count += 1
         
         if valid_count != 3: return
@@ -758,7 +766,7 @@ class BuilderBot(Bot):
         else:
             # print('5')
             if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
-                pathfind.silly_pathfind_to(self.rc, self.econ_connect_past_pos)
+                pathfind.silly_pathfind_to(self.rc, self.sense, self.econ_connect_past_pos)
             else:
                 if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
                     self.econ_connect_past_pos = self.rc.get_position()
@@ -775,7 +783,7 @@ class BuilderBot(Bot):
         # print('basic pf')
         if not self.rc.is_in_vision(self.attack_target):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
-            # pathfind.silly_pathfind_to(self.rc, self.attack_target)
+            # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
         
         entt = self.sense.get_entity(self.attack_target)
@@ -869,7 +877,7 @@ class BuilderBot(Bot):
             # if self.defence_use_fast:
             #     pathfind.fast_pathfind_to(self.rc, self.sense, self.defence_current_target, ignore_builder_at_tgt=True)
             # else:
-            pathfind.silly_pathfind_to(self.rc, self.defence_current_target)
+            pathfind.silly_pathfind_to(self.rc, self.sense, self.defence_current_target)
 
     def defence_station(self):
         if self.sense.ally_builders > 3:
@@ -891,7 +899,7 @@ class BuilderBot(Bot):
                 rc.move(d)
                 return
 
-        pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.pathfind_target)
 
     def defence_stalk(self):
         try:
@@ -905,14 +913,18 @@ class BuilderBot(Bot):
             if p in self.sense.ally_builders:
                 self.switch_back_to_neutral(self.attack_return_to)
                 return
+
+        if len(self.sense.ally_builders) > 4:
+            self.switch_back_to_neutral(self.attack_return_to)
+            return
         
-        pathfind.silly_pathfind_to(self.rc, self.defence_stalking_pos)
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.defence_stalking_pos)
 
     # Healer
 
     def core_healer(self):
-        pathfind.silly_pathfind_to(self.rc, self.core_pos)
-            
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
+
     # Attack
 
     def attack_goto(self):
@@ -928,7 +940,7 @@ class BuilderBot(Bot):
         if should_astar:
             pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
         else:
-            pathfind.silly_pathfind_to(self.rc, self.pathfind_target)
+            pathfind.silly_pathfind_to(self.rc, self.sense, self.pathfind_target)
 
         # # Find econ crippling target
         # budget = min(1200, self.rc.get_cpu_time_elapsed() + 500)
@@ -1026,7 +1038,7 @@ class BuilderBot(Bot):
         pass
 
     def attack_exec_plan(self):
-        print(self.attack_plan, 'at', self.attack_target)
+        # print(self.attack_plan, 'at', self.attack_target)
         self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
         self.rc.draw_indicator_dot(self.attack_from, 0, 255, 0)
 
@@ -1042,7 +1054,7 @@ class BuilderBot(Bot):
         # print('basic pf')
         if not self.rc.is_in_vision(self.attack_target):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
-            # pathfind.silly_pathfind_to(self.rc, self.attack_target)
+            # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
 
         # Possibly broken logic but still trying
@@ -1102,12 +1114,12 @@ class BuilderBot(Bot):
             self.switch_back_to_neutral(self.attack_return_to)
             return
 
-        print('try destroy', self.attack_target, self.rc.get_cpu_time_elapsed())
+        # print('try destroy', self.attack_target, self.rc.get_cpu_time_elapsed())
         if entt == self.attack_plan or (allied and entt in ENTITY_ATTACK_NOREPLACE):
             self.switch_back_to_neutral(self.attack_return_to)
             return
         
-        print(get_ti_cost(self.rc, self.attack_plan))
+        # print(get_ti_cost(self.rc, self.attack_plan))
         if not try_destroy(self.rc, self.sense, self.attack_from, self.attack_target, \
             ti_min=get_ti_cost(self.rc, self.attack_plan)+20):
             if self.sense.get_entity(self.attack_target) == None: self.attack_plan_timeout += 1
@@ -1117,7 +1129,7 @@ class BuilderBot(Bot):
         if self.attack_plan in ENTITY_TURRET and self.attack_plan_dir is None:
             turret_dir = micro.compute_best_turret_dir(self.rc, self.sense, self.attack_target, self.attack_plan, self.enemy_core_pos)
 
-        print('attacker setup', self.attack_target)
+        # print('attacker setup', self.attack_target)
         match self.attack_plan:
             case EntityType.GUNNER:
                 if not self.rc.can_build_gunner(self.attack_target, turret_dir): return
@@ -1156,7 +1168,7 @@ class BuilderBot(Bot):
     def recover_goto_core(self):
         pathfind.fast_pathfind_to(self.rc, self.sense, self.core_pos)
 
-        if self.rc.get_position().distance_squared(self.core_pos) <= 3:
+        if self.rc.get_position().distance_squared(self.core_pos) <= 18:
             self.switch_to_econ()
             return
 
@@ -1164,7 +1176,7 @@ class BuilderBot(Bot):
     ###         Helpers 
     ### ========================
 
-    def should_connect_to_ore(self, pos: Position, is_ax: bool) -> (bool, Direction):
+    def should_connect_to_ore(self, pos: Position, is_ax: bool, started=False) -> (bool, Direction):
         if pos is None: return (False, Direction.CENTRE)
         if pos in self.harvester_blacklist: return (False, Direction.CENTRE)
         
@@ -1181,8 +1193,14 @@ class BuilderBot(Bot):
         entt = self.sense.get_entity(pos)
         allied = self.sense.is_allied(pos)
         if entt in ENTITY_TURRET or entt == EntityType.FOUNDRY: return (False, Direction.CENTRE)
-        if allied and entt in ENTITY_TRANSPORT: return (False, Direction.CENTRE)
         
+        if allied and entt in ENTITY_TRANSPORT:
+            if entt == EntityType.CONVEYOR:
+                if not is_protecting_conveyor(self.rc, self.sense, pos):
+                    return (False, Direction.CENTRE)
+            else:
+                return (False, Direction.CENTRE)
+    
         has_free_side = False
         already_siphoned = False
         already_siphoned_dir = Direction.CENTRE
@@ -1207,23 +1225,30 @@ class BuilderBot(Bot):
             entt = self.sense.get_entity(p)
             if entt in ENTITY_TRANSPORT or entt == EntityType.CORE or entt == EntityType.FOUNDRY:
                 allied = self.sense.is_allied(p)
+                
                 if allied:
-                    already_siphoned = True
-                    already_siphoned_dir = d
+                    if entt == EntityType.CONVEYOR and (is_protecting_conveyor(self.rc, self.sense, p) or p in self.current_protector_set):
+                        # already_siphoned = False
+                        # nothing
+                        pass
+                    else:
+                        print(entt, p)
+                        already_siphoned = True
+                        already_siphoned_dir = d
                 else:
                     already_siphoned_dir = d
             
             if is_pos_editable(self.rc, p) and self.sense.get_entity(p) not in ENTITY_VALID_BLOCKAGE_ANY:
                 has_free_side = True
 
-        if d == Direction.CENTRE: return (True, Direction.CENTRE)
-        if bot_marked: return (False, Direction.CENTRE)
-        if has_harvester and already_siphoned: return (False, already_siphoned_dir)
+        if d == Direction.CENTRE:                                             return (True, Direction.CENTRE)
+        if bot_marked:                                                        return (False, Direction.CENTRE)
+        if has_harvester and already_siphoned:                                return (False, already_siphoned_dir)
         tgt = get_best_placable_adj_ignorebb(self.rc, pos, self.core_pos)
-        if not has_harvester and already_siphoned and not is_ax: return (harvester_placable, already_siphoned_dir)
-        if has_harvester and not already_siphoned: return (not not_enough_info, tgt)
+        if not has_harvester and already_siphoned and not is_ax:              return (harvester_placable, already_siphoned_dir)
+        if has_harvester and not already_siphoned:                            return (not not_enough_info, tgt)
         if not has_harvester and not already_siphoned and harvester_placable: return (True, tgt)
-
+        
         return (False, Direction.CENTRE)
 
     def compute_next_bridge_target(self, is_ax: bool) -> (Position, bool):
@@ -1248,16 +1273,7 @@ class BuilderBot(Bot):
             if best_final_target_tile is not None:
                 print('directly to target ', best_final_target_tile)
                 return (best_final_target_tile, True)
-
-            # for t in self.sense.nearby_tiles:
-            #     if start.distance_squared(t) != 1: continue
-            #     entt = self.sense.get_entity(t)
-            #     if entt not in ENTITY_TRANSPORT: continue
-            #     bldg = self.rc.get_tile_building_id(t)
-            #     if self.rc.get_stored_resource(bldg) is not None: continue
-            #     print('merge one tile away ', t)
-            #     return (t, True)
-        
+                
         if is_ax:
             best = None
             best_score = float('-inf')
@@ -1280,10 +1296,11 @@ class BuilderBot(Bot):
         for t in self.sense.nearby_tiles:
             if start.distance_squared(t) > GameConstants.BRIDGE_TARGET_RADIUS_SQ: continue
             is_to_transport = False
-            env = self.sense.get_env(t)
-            allied = self.sense.is_allied(t)
-            entt = self.sense.get_entity(t)
+            tidx = self.sense.idx(t)
+            env = self.sense.get_env_idxd(tidx)
             if env == Environment.WALL: continue
+            allied = self.sense.is_allied_idxd(tidx)
+            entt = self.sense.get_entity_idxd(tidx)
             if not allied and entt not in ENTITY_WALKABLE: continue
             if allied:
                 if entt in ENTITY_TRANSPORT:
@@ -1291,7 +1308,10 @@ class BuilderBot(Bot):
                     if (not is_ax and resource is not None) or (is_ax and resource != ResourceType.TITANIUM):
                         continue
                     else:
-                        is_to_transport = True
+                        is_final = True
+                        if entt == EntityType.CONVEYOR and is_protecting_conveyor(self.rc, self.sense, t):
+                            is_final = False
+                        is_to_transport = is_final
                 elif entt not in ENTITY_TRIVIAL:
                     continue
             if t in self.sense.ally_builders: continue
