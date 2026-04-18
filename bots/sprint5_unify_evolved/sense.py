@@ -56,6 +56,13 @@ TURRET_ATTACK_COSTS = {
     EntityType.LAUNCHER: 10
 }
 
+
+_OFFSETS = (
+    (-1,-1),(0,-1),(1,-1),
+    (-1, 0),       (1, 0),
+    (-1, 1),(0, 1),(1, 1),
+)
+
 class Sense:
     def __init__(self, rc: Controller):
         self.rc = rc
@@ -66,6 +73,7 @@ class Sense:
         self.nearby_tiles = []
 
         self.map = array('H', [0] * self.size)
+        self.reachable = 0 # Bitint bitmask
         self.ally_builders:  set[Position] = set()
         self.enemy_builders: set[Position] = set()
         self.transport_attack_blacklist: set[Position] = set()
@@ -145,6 +153,9 @@ class Sense:
     def is_seen(self, pos: Position):
         return self.map[self.idx(pos)] != 0
 
+    def is_reachable(self, p: Position) -> bool:
+        return (self.reachable >> (p.y * self.map_width + p.x)) & 1
+
 
     def get_env_idxd(self, idx: int):
         return _VALUE_TO_ENVIRONMENT[self.map[idx] >> 13]
@@ -160,7 +171,9 @@ class Sense:
     
     def is_seen_idxd(self, idx: int):
         return self.map[idx] != 0
-
+    
+    def is_reachable_idxd(self, idx: int) -> bool:
+        return (self.reachable >> idx) & 1
 
     def ti_trend(self, alpha=0.3, cap=50):
         if len(self.ti_tracker) < 2: return 0
@@ -189,6 +202,8 @@ class Sense:
         ti, ax = self.rc.get_global_resources()
         self.ti_tracker.append(ti)
         self.ax_tracker.append(ax)
+
+        self.reachable |= (1 << (self.my_pos.x + self.my_pos.y * self.map_width))
 
         self.ally_builders.clear()
         self.enemy_builders.clear()
@@ -219,6 +234,8 @@ class Sense:
             if self.flow_tracking:
                 self.remove_edges_from(t)
             self._process_tile_incremental(t)
+
+        self._update_reachability(new_tiles)
         
         if self.flow_tracking:
             for u in self.ally_turrets:
@@ -248,7 +265,7 @@ class Sense:
                 self.set_entt_and_env(t, dir, entt, env, allied)
         else:
             self.set_entt_and_env(t, dir, entt, env, allied)
-            
+
             if entt in ENTITY_TURRET and not allied:
                 self.add_turret_attack_costs(t, entt, dir, 1)
 
@@ -330,6 +347,8 @@ class Sense:
             elif entt in ENTITY_TRANSPORT:
                 self.enemy_transports.append(t)
         else:
+            self.reachable |= (1 << (t.x + t.y * self.map_width))
+
             if entt in ENTITY_TURRET:
                 self.ally_turrets.append(t)
             elif entt in ENTITY_TRANSPORT:
@@ -348,6 +367,53 @@ class Sense:
                 if dist < self.nearest_enemy_cheby_dist:
                     self.nearest_enemy_cheby_dist = dist
                     self.nearest_enemy_bb = t
+
+    def _update_reachability(self, new_tiles):
+        reachable = self.reachable
+        get_env   = self.get_env
+        offsets   = _OFFSETS
+        map_w     = self.map_width
+        map_h     = self.map_height
+
+        new_walkable = set()
+        nw_add = new_walkable.add
+        for t in new_tiles:
+            env = get_env(t)
+            if env != Environment.WALL:
+                nw_add(t)
+        if not new_walkable: return
+
+        queue    = deque()
+        q_append = queue.append
+        in_queue = set()
+        iq_add   = in_queue.add
+
+        for t in new_walkable:
+            tx, ty = t
+            for dx, dy in offsets:
+                nx = tx + dx
+                ny = ty + dy
+                if 0 <= nx < map_w and 0 <= ny < map_h:
+                    if (reachable >> (nx + ny * map_w)) & 1:
+                        q_append(t)
+                        iq_add(t)
+                        break
+        if not queue: return
+
+        popleft = queue.popleft
+        while queue:
+            cur = popleft()
+            cx, cy = cur
+            reachable |= (1 << (cx + cy * map_w))
+            for dx, dy in offsets:
+                nx = cx + dx
+                ny = cy + dy
+                nb = (nx, ny)
+                if nb in new_walkable and nb not in in_queue:
+                    iq_add(nb)
+                    q_append(nb)
+
+        self.reachable = reachable
         
     # Feed Graph stuff
 
