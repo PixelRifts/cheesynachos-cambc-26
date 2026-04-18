@@ -1,5 +1,5 @@
 import sys
-from procedure import bb_should_fire, is_protecting_conveyor
+from procedure import bb_should_fire
 
 from sense import Sense
 from helpers import *
@@ -120,7 +120,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_astar_internal(rc, sense, max_expansions=100, ignore_builder_at_tgt=ignore_builder_at_tgt)
+        step_astar_internal(rc, sense, max_expansions=150, ignore_builder_at_tgt=ignore_builder_at_tgt)
         pf_state.computed_this_turn = True
 
     if not pf_state.astar_active and pf_state.failed:
@@ -263,7 +263,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
                 allied = _is_allied(nxt)
                 cost  += _ENV_COSTS[env]
                 cost  += _ENTITY_COSTS[entt][1 - int(allied)]
-                # cost  += _turret_cost_map[nxt] // 2
+                cost  += _turret_cost_map[nxt]   # nxt is already the flat index
                 if cost >= 100000:
                     continue
             
@@ -414,7 +414,6 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
     map_w = sense.map_width
     map_h = sense.map_height
-
     
     while open_set and expansions < max_expansions:
         f, current = heappop(open_set)
@@ -451,11 +450,9 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 allied = sense.is_allied(nxt)
                 if env == Environment.WALL: continue
                 if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != goal: continue
-                if allied and (entt == EntityType.BRIDGE or \
+                if allied and (entt == EntityType.CONVEYOR or entt == EntityType.BRIDGE or \
                     entt == EntityType.SPLITTER or entt == EntityType.ARMOURED_CONVEYOR) and nxt != goal: continue
-                if allied and entt == EntityType.CONVEYOR:
-                    if (not is_protecting_conveyor(rc, sense, nxt) and nxt != goal): continue
-                
+
                 if not is_entt_pathable(entt, allied):
                     if allied and entt == EntityType.BARRIER:
                         cost = ENTITY_COSTS_CONVEYOR[entt][0]
@@ -500,7 +497,7 @@ def reconstruct_path(came_from, current):
 
 # This is a 2 tier-ed approach, that I implemented for MIT Battlecode translated to python
 # Could have bugs, subject to change
-def silly_pathfind_to(rc: Controller, sense: Sense, target: Position):
+def silly_pathfind_to(rc: Controller, target: Position):
     global pf_state
 
     if pf_state.final_target != target:
@@ -520,7 +517,7 @@ def silly_pathfind_to(rc: Controller, sense: Sense, target: Position):
     
     if rc.get_position() == pf_state.virtual_target:
         pf_state.bug_cooldown = 8
-        recompute_silly_virtual_target(rc, sense)
+        recompute_silly_virtual_target(rc)
     else:
         pf_state.bug_cooldown -= 1
     
@@ -529,7 +526,7 @@ def silly_pathfind_to(rc: Controller, sense: Sense, target: Position):
         pf_state.should_bug = False
         return False
     
-    silly_pathfind_to_virtual(rc, sense)
+    silly_pathfind_to_virtual(rc)
     if rc.get_position() == target:
         return True
     rc.draw_indicator_line(rc.get_position(), pf_state.virtual_target, 255, 255, 255)
@@ -538,7 +535,7 @@ def silly_pathfind_to(rc: Controller, sense: Sense, target: Position):
     return False
 
 
-def recompute_silly_virtual_target(rc: Controller, sense: Sense):
+def recompute_silly_virtual_target(rc: Controller):
     global pf_state
 
     current: Position = pf_state.virtual_target
@@ -634,65 +631,45 @@ def recompute_silly_virtual_target(rc: Controller, sense: Sense):
     # print(pf_state.virtual_target, file=sys.stderr)
 
 
-def silly_pathfind_to_virtual(rc: Controller, sense: Sense):
+def silly_pathfind_to_virtual(rc: Controller):
     global pf_state
 
     my_loc = rc.get_position()
     goal = pf_state.virtual_target
-    _ENV_WALL              = Environment.WALL
-    _ENV_COSTS             = ENV_COSTS
-    _ENTITY_COSTS          = ENTITY_COSTS_FAST
-    _turret_cost_map       = sense.turret_cost_map
 
     if my_loc == goal:
         return
 
-    dist = {goal: 0}
+    width = rc.get_map_width()
+    height = rc.get_map_height()
+
+    q = deque([goal])
+    visited = {goal}
     parent = {}
-    heap = [(0, goal)]
 
     found = False
 
-    while heap:
-        dcur, cur = heappop(heap)
+    while q:
+        cur = q.popleft()
 
         if cur == my_loc:
             found = True
             break
 
-        if dcur > dist[cur]:
-            continue
-
         for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
             nxt = cur.add(d)
 
+            if nxt in visited:
+                continue
             if not actually_navvable(rc, nxt):
                 continue
-
             bbid = rc.get_tile_builder_bot_id(nxt)
             if bbid is not None and bbid != rc.get_id():
                 continue
 
-            # define weight here
-            cost = 1
-            if sense.is_seen(nxt):
-                env = sense.get_env(nxt)
-                if env == Environment.WALL: continue
-                
-                entt   = sense.get_entity(nxt)
-                allied = sense.is_allied(nxt)
-                cost  += _ENV_COSTS[env]
-                cost  += _ENTITY_COSTS[entt][1 - int(allied)]
-                # cost  += _turret_cost_map[sense.idx(nxt)]
-                if cost >= 100000:
-                    continue
-
-            nd = dcur + cost
-
-            if nxt not in dist or nd < dist[nxt]:
-                dist[nxt] = nd
-                parent[nxt] = cur
-                heappush(heap, (nd, nxt))
+            visited.add(nxt)
+            parent[nxt] = cur
+            q.append(nxt)
 
     if not found:
         pf_state.virtual_target = my_loc
@@ -778,8 +755,7 @@ def cardinal_unit_virtually_navvable(rc: Controller, pos: Position, non_conveyor
         if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
             return True
         if rc.get_entity_type(bldg) in ENTITY_TRANSPORT:
-            if not is_protecting_conveyor_simple(rc, pos):
-                return False
+            return False
     
     return (rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos)
 

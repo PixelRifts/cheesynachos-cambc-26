@@ -49,7 +49,7 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
     # Less HP
     if not is_empty:
         bbd = GameConstants.BUILDER_BOT_ATTACK_DAMAGE
-        ticks_required = (rc.get_hp(rc.get_tile_building_id(poi)) + bbd - 1) // bbd
+        ticks_required = (rc.get_hp(sense.tile_bldg_cache[poi]) + bbd - 1) // bbd
         score -= ticks_required * 5
     
     for d in DIRECTIONS:
