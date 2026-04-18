@@ -202,12 +202,13 @@ class BuilderBot(Bot):
         if self.state not in MICRO_EXCLUDE_STATES:
             if len(self.sense.enemy_turrets) != 0:
                 self.micro_destroy_turrets()
-            elif len(self.sense.enemy_builders) != 0:
-                if not self.micro_try_attack() and self.state in MICRO_FOLLOW_ENABLE_STATES:
-                    self.micro_follow_bot()
             else:
-                if len(self.sense.ally_builders) == 0:
-                    self.micro_try_attack()
+                if len(self.sense.enemy_builders) != 0:
+                    if not self.micro_try_attack() and self.state in MICRO_FOLLOW_ENABLE_STATES:
+                        self.micro_follow_bot()
+                else:
+                    if len(self.sense.ally_builders) == 0 and len(self.sense.enemy_transports) > 0:
+                        self.micro_try_attack()
 
         match self.state:
             case BotState.ECON_EXPLORE:
@@ -1035,6 +1036,7 @@ class BuilderBot(Bot):
         self.rc.draw_indicator_dot(self.attack_from, 0, 255, 0)
 
         # print('timeout check', self.attack_plan_timeout, self.rc.get_cpu_time_elapsed())
+        
         if self.rc.is_in_vision(self.attack_target):
             hp = self.rc.get_hp(self.rc.get_tile_building_id(self.attack_target))
             if hp > self.prev_attack_target_hp:
@@ -1045,6 +1047,7 @@ class BuilderBot(Bot):
             self.prev_attack_target_hp = hp
         else:
             self.attack_plan_timeout -= 1
+            
         if self.attack_plan_timeout <= 0:
             expiry = self.rc.get_current_round() + 100
             self.attack_blacklist_queue.append((self.attack_target, expiry))
