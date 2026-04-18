@@ -6,7 +6,7 @@ using multi-threaded execution.
 
 import sys
 import os
-import random
+import random as random_module
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -100,6 +100,8 @@ def main():
             if not opponents:
                 opponents = [b for b in bots if b != target_bot]
 
+        map_seed = int(test_cfg.get("seed", int(project_cfg.get("seed", 1))))
+        random = random_module.Random(map_seed)
         raw_maps = test_cfg.get("maps", ["all"])
         if "all" in raw_maps:
             test_maps = maps

@@ -414,6 +414,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
     map_w = sense.map_width
     map_h = sense.map_height
+
     
     while open_set and expansions < max_expansions:
         f, current = heappop(open_set)
@@ -444,22 +445,21 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
             cost = 1
 
             if not is_in_map(nxt, map_w, map_h): continue
-            if not sense.is_seen(nxt): continue
-            
-            env = sense.get_env(nxt)
-            entt = sense.get_entity(nxt)
-            allied = sense.is_allied(nxt)
-            if env == Environment.WALL: continue
-            if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != goal: continue
-            if allied and (entt == EntityType.BRIDGE or \
-                entt == EntityType.SPLITTER or entt == EntityType.ARMOURED_CONVEYOR) and nxt != goal: continue
-            if allied and entt == EntityType.CONVEYOR:
-                if (not is_protecting_conveyor(rc, sense, nxt) and nxt != goal): continue
-            
-            if not is_entt_pathable(entt, allied):
-                if allied and entt == EntityType.BARRIER:
-                    cost = ENTITY_COSTS_CONVEYOR[entt][0]
-                else: continue
+            if sense.is_seen(nxt):
+                env = sense.get_env(nxt)
+                entt = sense.get_entity(nxt)
+                allied = sense.is_allied(nxt)
+                if env == Environment.WALL: continue
+                if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None and nxt != goal: continue
+                if allied and (entt == EntityType.BRIDGE or \
+                    entt == EntityType.SPLITTER or entt == EntityType.ARMOURED_CONVEYOR) and nxt != goal: continue
+                if allied and entt == EntityType.CONVEYOR:
+                    if (not is_protecting_conveyor(rc, sense, nxt) and nxt != goal): continue
+                
+                if not is_entt_pathable(entt, allied):
+                    if allied and entt == EntityType.BARRIER:
+                        cost = ENTITY_COSTS_CONVEYOR[entt][0]
+                    else: continue
                 
             tentative = g_score[current] + cost
             if nxt in pf_state.closed_set: continue
@@ -812,4 +812,4 @@ def should_destroy(rc: Controller, pos: Position) -> bool:
     if bldg is None: return False
     entt = rc.get_entity_type(bldg)
     # TODO maybe add more things that should be destroyed here
-    return entt == EntityType.BARRIER
+    return entt == EntityType.MARKER or entt == EntityType.BARRIER

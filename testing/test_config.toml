@@ -12,7 +12,7 @@ opponents = ["sprint5_unify_defence"]
 # Use ["all"] to include all *.map26 files.
 # Use "sample10", "sample20", "sample30" or "sample40" to sample a random set of 10/20/30/40 maps
 # maps = ["all"]
-maps = ["all"]
+maps = ["sample10"]
 
 # Execution settings
 threads = 12

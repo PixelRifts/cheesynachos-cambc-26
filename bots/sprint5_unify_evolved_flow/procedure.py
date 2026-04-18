@@ -17,7 +17,7 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position, ti_min:
         return False
     
     bldg = rc.get_tile_building_id(p)
-    if bldg is None or sense.get_entity(p) == EntityType.MARKER:
+    if bldg is None:
         if me is None: return True
         if ti < ti_min:
             # print('not enough ti to justify moving out of the way ', ti, ti_min)
