@@ -249,6 +249,9 @@ class Sense:
         else:
             self.set_entt_and_env(t, dir, entt, env, allied)
             
+            if entt in ENTITY_TURRET and not allied:
+                self.add_turret_attack_costs(t, entt, dir, 1)
+
             # Symmetry Crack if never seen before
             if len(self.symmetries_possible) > 1:
                 to_elim = []

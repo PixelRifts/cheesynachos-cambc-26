@@ -263,7 +263,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
                 allied = _is_allied(nxt)
                 cost  += _ENV_COSTS[env]
                 cost  += _ENTITY_COSTS[entt][1 - int(allied)]
-                cost  += _turret_cost_map[nxt]   # nxt is already the flat index
+                # cost  += _turret_cost_map[nxt] // 2
                 if cost >= 100000:
                     continue
             
@@ -414,6 +414,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
     map_w = sense.map_width
     map_h = sense.map_height
+
     
     while open_set and expansions < max_expansions:
         f, current = heappop(open_set)
@@ -682,7 +683,7 @@ def silly_pathfind_to_virtual(rc: Controller, sense: Sense):
                 allied = sense.is_allied(nxt)
                 cost  += _ENV_COSTS[env]
                 cost  += _ENTITY_COSTS[entt][1 - int(allied)]
-                cost  += _turret_cost_map[sense.idx(nxt)]
+                # cost  += _turret_cost_map[sense.idx(nxt)]
                 if cost >= 100000:
                     continue
 

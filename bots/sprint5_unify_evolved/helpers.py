@@ -120,6 +120,7 @@ def is_pos_conveyorable(rc: Controller, pos: Position) -> bool:
 def is_protecting_conveyor_simple(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     if rc.get_entity_type(bldg) != EntityType.CONVEYOR: return False
+    if rc.get_team(bldg) != rc.get_team(): return False
     going_to = pos.add(rc.get_direction(bldg))
     if not rc.is_in_vision(going_to): return True
     going_bldg = rc.get_tile_building_id(going_to)
@@ -143,7 +144,7 @@ def is_pos_quickly_turretable(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     allied = rc.get_team() == rc.get_team(bldg)
     entt = rc.get_entity_type(bldg)
-    return allied and entt in ENTITY_TURRET_REPLACABLE
+    return allied and (entt in ENTITY_TURRET_REPLACABLE or is_protecting_conveyor_simple(rc, pos))
 
 
 def is_pos_turretable(rc: Controller, pos: Position) -> bool:
