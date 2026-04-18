@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>p5 Grid Radius Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/p5.min.js"></script>
+</head>
+<body>
+    <script>
+    let cols = 20;
+    let rows = 20;
+    let cellSize = 30;
+    let special = [
+    {x: 20-10, y: 21-10},
+    {x: 18-10, y: 24-10}
+    ];
+
+    let r = 2; // radius in tiles
+
+    function setup() {
+        createCanvas(cols * cellSize, rows * cellSize);
+    }
+
+    function draw() {
+        background(30);
+
+        let gx = floor(mouseX / cellSize);
+        let gy = floor(mouseY / cellSize);
+
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+            let dx = x - gx;
+            let dy = y - gy;
+            let d2 = dx * dx + dy * dy;
+
+            let isSpecial = special.some(p => p.x === x && p.y === y);
+
+            if (isSpecial) {
+                fill(255, 100, 100);
+            } else if (d2 <= r) {
+                fill(100, 200, 255);
+            } else {
+                fill(60);
+            }
+
+
+            stroke(20);
+            rect(x * cellSize, y * cellSize, cellSize, cellSize);
+            }
+        }
+
+
+        // draw circle
+        noFill();
+        stroke(255);
+        strokeWeight(2);
+        ellipse(
+            gx * cellSize + cellSize / 2,
+            gy * cellSize + cellSize / 2,
+            (Math.sqrt(r) * 2 + 1) * cellSize
+        );
+        
+        // display r
+        noStroke();
+        fill(255);
+        text("r = " + r.toFixed(2), 10, 20);
+    }
+
+    function mouseWheel(event) {
+        r += event.delta / 400;
+        r = max(0, r);
+        return false;
+    }
+    </script>
+</body>
+</html>

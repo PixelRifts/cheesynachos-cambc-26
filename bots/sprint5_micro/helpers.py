@@ -20,11 +20,17 @@ ENTITY_WALKABLE    = ENTITY_TRIVIAL | ENTITY_TRANSPORT
 ENTITY_DIRECTIONAL = { EntityType.CONVEYOR, EntityType.ARMOURED_CONVEYOR, EntityType.SPLITTER, EntityType.GUNNER, EntityType.SENTINEL, EntityType.BREACH }
 ENTITY_GUNNER_PASS = { None, EntityType.MARKER }
 
+ENTITY_INFRASTRUCTURE = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+ENTITY_TURRET_REPLACABLE = { EntityType.BARRIER } | ENTITY_TRIVIAL
 ENTITY_VALID_BLOCKAGE_ANY = { EntityType.BARRIER, EntityType.HARVESTER } | ENTITY_TURRET
-ENTITY_VALID_BLOCKAGE_FRIENDLY = ENTITY_TURRET | ENTITY_TRANSPORT
+ENTITY_VALID_BLOCKAGE_FRIENDLY = { EntityType.FOUNDRY } | ENTITY_TURRET | ENTITY_TRANSPORT
 ENTITY_ATTACK_NOREPLACE = { EntityType.HARVESTER } # | ENTITY_TRANSPORT
 
+ENTITY_INVALID_ATTACK_ANY      = { EntityType.HARVESTER }
+ENTITY_INVALID_ATTACK_FRIENDLY = { EntityType.FOUNDRY } | ENTITY_TRANSPORT | ENTITY_TURRET
+
 RESOURCE_ALLOWED_AMMO = { ResourceType.TITANIUM, ResourceType.REFINED_AXIONITE }
+ENVIRONMENT_ORE = { Environment.ORE_AXIONITE, Environment.ORE_TITANIUM }
     
 def is_in_map(pos: Position, width, height) -> bool:
     return pos.x >= 0 and pos.x < width and pos.y >= 0 and pos.y < height
@@ -118,7 +124,7 @@ def is_pos_turretable(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     allied = rc.get_team() == rc.get_team(bldg)
     entt = rc.get_entity_type(bldg)
-    return (not allied and entt in ENTITY_WALKABLE) or (allied and entt in ENTITY_TRIVIAL)
+    return (not allied and entt in ENTITY_WALKABLE) or (allied and entt in ENTITY_TURRET_REPLACABLE)
 
 def is_entt_pathable(entt: EntityType, allied: bool) -> bool:
     if entt in ENTITY_WALKABLE: return True
@@ -147,16 +153,20 @@ def is_enemy_transport(rc: Controller, pos: Position) -> bool:
 # Adjacency Stuff
 
 def get_best_placable_adj_ignorebb(rc: Controller, a: Position, b: Position) -> Direction:
-    best_dist = 1000000
     best_dir = Direction.CENTRE
+    best_score = -1000000
+    
     for d in CARDINAL_DIRECTIONS:
         p = a.add(d)
         if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
         if not rc.is_in_vision(p): continue
-        if not (is_pos_turretable(rc, p) and not is_enemy_transport(rc, p)): continue
+        if not (is_pos_conveyorable(rc, p) and not is_enemy_transport(rc, p)): continue
         dist = p.distance_squared(b)
-        if dist < best_dist:
-            best_dist = dist
+        score = -dist
+        if rc.get_tile_env(p) in ENVIRONMENT_ORE: score -= 10
+        
+        if score > best_score:
+            best_score = score
             best_dir = d
     return best_dir
 
@@ -185,7 +195,7 @@ def get_best_pathable_adj_with_diag(rc: Controller, pos: Position, heu: Position
         if not rc.is_in_vision(p): continue
         
         if not is_pos_pathable(rc, p): continue
-        if is_friendly_transport(rc, p): continue
+        # if is_friendly_transport(rc, p): continue
         bb = rc.get_tile_builder_bot_id(p)
         if bb is not None: continue
         dist = p.distance_squared(heu)
@@ -306,10 +316,31 @@ def cardinal_direction_to(me: Position, other: Position) -> Direction:
     else:
         return Direction.SOUTH if dy > 0 else Direction.NORTH
 
-def biased_random_dir(rc: Controller) -> Direction:
+def is_near_center(pos, w, h):
+    cx, cy = w // 2, h // 2
+
+    # distance to center (chebyshev)
+    dc = max(abs(pos.x - cx), abs(pos.y - cy))
+
+    # distance to nearest edge
+    de = min(pos.x, pos.y, w - 1 - pos.x, h - 1 - pos.y)
+
+    # tune thresholds as needed
+    if dc <= min(w, h) // 6:
+        return True
+    if de <= min(w, h) // 6:
+        return False
+    return False
+
+def biased_random_dir(rc: Controller, core_pos: Position) -> Direction:
     c = random.randint(0, 10)
     if c < 3:
-        return rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
+        to_center = rc.get_position().direction_to(Position(rc.get_map_width() // 2, rc.get_map_height() // 2))
+        if is_near_center(core_pos, rc.get_map_width(), rc.get_map_height()):
+            opp = to_center.opposite()
+            return random.choice([opp, opp.rotate_left(), opp.rotate_right()])
+        
+        return random.choice([to_center, to_center.rotate_left(), to_center.rotate_right()])
     return random.choice(DIRECTIONS)
 
 def get_furthest_tile_in_dir(rc: Controller, pos: Position, dir: Direction) -> Position:

@@ -1,21 +1,21 @@
 # Test runner config for testing/run_tests.py
 
 # Bot to evaluate
-target_bot = "sprint4_unify"
-# target_bot = "sprint3_core"
+target_bot = "sprint5_unify_evolved"
+# target_bot = "sprint5_unify_evolved"
 
 # Opponents to test against.
 # Use ["all"] to include all bots except target_bot.
-opponents = ["sprint4_patrols"]
+opponents = ["sprint4_unify"]
 
 # Maps to run.
 # Use ["all"] to include all *.map26 files.
 # Use "sample10", "sample20", "sample30" or "sample40" to sample a random set of 10/20/30/40 maps
 # maps = ["all"]
-maps = ["all"]
+maps = ["sample10"]
 
 # Execution settings
-threads = 8
+threads = 12
 matches_per = 2
 seed = 1
 save_csv = true

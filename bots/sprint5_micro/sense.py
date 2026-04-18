@@ -2,6 +2,7 @@ from array import array
 
 from helpers import *
 
+from collections import deque
 from typing import Optional, Set, Dict
 from enum import Enum
 from cambc import Controller, Environment, Position, Direction, EntityType
@@ -50,9 +51,9 @@ _VALUE_TO_DIRECTION = {v: k for k, v in DIRECTION_TO_VALUE.items()}
 
 TURRET_ATTACK_COSTS = {
     EntityType.GUNNER:   10,
-    EntityType.SENTINEL: 5,
-    EntityType.BREACH:   20,
-    EntityType.LAUNCHER: 5
+    EntityType.SENTINEL: 6,
+    EntityType.BREACH:   40,
+    EntityType.LAUNCHER: 10
 }
 
 class Sense:
@@ -74,6 +75,12 @@ class Sense:
         self.reverse_feed_graph: Dict[Position, Set[Position]] = {}
         self.enemy_core_found: Position = None
         self.heal_targets: Set[Position] = set()
+        self.enemy_turrets: Set[Position] = set()
+        self.enemy_transports: Set[Position] = set()
+        self.ally_transports: Set[Position] = set()
+        
+        self.ti_tracker = deque(maxlen=16)
+        self.ax_tracker = deque(maxlen=16)
         
         self.turret_cost_map = array('i', [0] * self.size)
     
@@ -132,7 +139,34 @@ class Sense:
     def is_seen(self, pos: Position):
         return self.map[self.idx(pos)] != 0
 
+    def ti_trend(self, alpha=0.3, cap=50):
+        if len(self.ti_tracker) < 2: return 0
+        ema = 0
+        prev = self.ti_tracker[0]
+        for x in self.ti_tracker:
+            d = x - prev
+            if d < -cap: d = -cap
+            if d > cap: d = cap
+            ema = alpha * d + (1 - alpha) * ema
+            prev = x
+        return ema
+
+    def ax_trend(self, alpha=0.3):
+        if len(self.ax_tracker) < 2: return 0
+        ema = 0
+        prev = self.ax_tracker[0]
+        for x in self.ax_tracker:
+            d = x - prev
+            ema = alpha * d + (1 - alpha) * ema
+            prev = x
+        return ema
+    
     def update(self):
+        my_pos = self.rc.get_position()
+        ti, ax = self.rc.get_global_resources()
+        self.ti_tracker.append(ti)
+        self.ax_tracker.append(ax)
+
         for s in self.env_index.values():  s.clear()
         for s in self.entt_index.values(): s.clear()
         self.ally_builders.clear()
@@ -140,6 +174,9 @@ class Sense:
         self.heal_targets.clear()
         
         self.transport_attack_blacklist.clear()
+        self.enemy_turrets.clear()
+        self.enemy_transports.clear()
+        self.ally_transports.clear()
         
         self.nearby_tiles = self.rc.get_nearby_tiles()
         # TODO: Do some generation tracking to not have to do a full iter on nearby tiles again
@@ -148,6 +185,8 @@ class Sense:
                 self.remove_edges_from(t)
         
         for t in self.nearby_tiles:
+            already_seen = self.is_seen(t)
+            
             # Save Env and Buildings
             env = self.rc.get_tile_env(t)
             bldg = self.rc.get_tile_building_id(t)
@@ -174,6 +213,16 @@ class Sense:
             # Heal targets
             if allied and self.rc.get_hp(bldg) < self.rc.get_max_hp(bldg):
                 self.heal_targets.add(t)
+            
+            # Enemy Infra
+            if not allied:
+                if entt in ENTITY_TURRET:
+                    self.enemy_turrets.add(t)
+                if entt in ENTITY_TRANSPORT:
+                    self.enemy_transports.add(t)
+            else:
+                if entt in ENTITY_TRANSPORT:
+                    self.ally_transports.add(t)
 
             # Special cases
             if not allied and entt == EntityType.CORE and self.enemy_core_found is None:
@@ -189,21 +238,23 @@ class Sense:
             # Save Builder Bots
             bb = self.rc.get_tile_builder_bot_id(t)
             if bb is not None:
-                if self.rc.get_team(bb) == self.rc.get_team() and self.rc.get_id() != bb:
-                    self.ally_builders.add(t)
+                if self.rc.get_team(bb) == self.rc.get_team():
+                    if self.rc.get_id() != bb:
+                        self.ally_builders.add(t)
                 else:
                     self.enemy_builders.add(t)
 
-            # Crack Symmetry
-            if len(self.symmetries_possible) > 1:
-                to_elim = []
-                for sym in self.symmetries_possible:
-                    test = get_symmetric(t, self.map_width, self.map_height, sym)
-                    env_here = self.get_env(test)
-                    if env_here != None:
-                        if env_here != env:
-                            to_elim.append(sym)
-                self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
+            if not already_seen:
+                # Crack Symmetry
+                if len(self.symmetries_possible) > 1:
+                    to_elim = []
+                    for sym in self.symmetries_possible:
+                        test = get_symmetric(t, self.map_width, self.map_height, sym)
+                        env_here = self.get_env(test)
+                        if env_here != None:
+                            if env_here != env:
+                                to_elim.append(sym)
+                    self.symmetries_possible = [x for x in self.symmetries_possible if x not in to_elim]
         
         if self.flow_tracking:
             for u in self.entt_index[ENTITY_TYPE_TO_VALUE[EntityType.GUNNER]]:
@@ -267,8 +318,7 @@ class Sense:
         for t in tiles:
             if not is_in_map(t, self.map_width, self.map_height): continue
             self.turret_cost_map[self.idx(t)] += cost
-            self.rc.draw_indicator_dot(t, 0, 0, 255)
-
+            
     # Misc
 
     def eliminate_next_symmetry(self):

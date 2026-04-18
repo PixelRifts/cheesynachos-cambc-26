@@ -11,3 +11,9 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+
+# testing
+bots/sidds-tests
+
+#zips
+*.zip
