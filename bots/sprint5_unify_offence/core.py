@@ -8,8 +8,6 @@ from collections import deque
 AXIONITE_STOCKPILE_THRESHOLD_ROUND = 1200
 AXIONITE_MIN_STOCKPILE = 41
 TITANIUM_MAINTAIN_AMOUNT = 1000
-RUSH_GROUP_SIZE = 1
-INIT_RUSH = 1
 
 class Core(Bot):
     def __init__(self, rc: Controller):
@@ -59,9 +57,6 @@ class Core(Bot):
 
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
-        if self.rush_count < INIT_RUSH:
-            self.spawn_rush()
-
         if self.healer_count < 1:
             _ = self.spawn_healer()
 
@@ -76,8 +71,6 @@ class Core(Bot):
         target = 3 + turn // 50
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:
-            if (self.rush_count - INIT_RUSH) % RUSH_GROUP_SIZE == 0:
-                self.spawn_rush()
             if self.econ_count <= 2*self.rush_count:
                 self.spawn_econ()
                 return
