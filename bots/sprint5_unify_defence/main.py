@@ -1,8 +1,8 @@
 import random
 
-# import cProfile
-# import sys
-# import pstats
+import cProfile
+import sys
+import pstats
 
 from cambc import Controller, Direction, EntityType, Environment, Position
 
@@ -16,7 +16,7 @@ from launcher import Launcher
 from sentinel import Sentinel
 from gunner import Gunner
 
-# profiler = cProfile.Profile()
+profiler = cProfile.Profile()
 
 class Player:
     def __init__(self):
@@ -41,10 +41,10 @@ class Player:
                 self.brain = Sentinel(rc)
             print('total init time =', rc.get_cpu_time_elapsed()-start)
         
-        # proffed = False
-        # if rc.get_entity_type() == EntityType.BUILDER_BOT:
-        #     profiler.enable()
-        #     proffed = True
+        proffed = False
+        if rc.get_entity_type() == EntityType.BUILDER_BOT:
+            profiler.enable()
+            proffed = True
 
         start = rc.get_cpu_time_elapsed()
         self.brain.start_turn()
@@ -57,12 +57,12 @@ class Player:
 
         self.brain.end_turn()
         
-        # if proffed:
-        #     profiler.disable()
-        #     # stats = pstats.Stats(profiler, stream=sys.stderr)
-        #     # stats.sort_stats("cumtime").print_stats()
+        if proffed:
+            profiler.disable()
+            # stats = pstats.Stats(profiler, stream=sys.stderr)
+            # stats.sort_stats("cumtime").print_stats()
 
-        #     if rc.get_current_round() % 100 == 0:
-        #         profiler.dump_stats("profile.prof")
+            if rc.get_current_round() % 100 == 0:
+                profiler.dump_stats("profile.prof")
         
         

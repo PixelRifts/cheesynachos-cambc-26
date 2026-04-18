@@ -432,3 +432,67 @@ def get_turret_tiles(rc: Controller, e: EntityType, p: Position, dir: Direction)
                 tiles.append(a)
         case _: tiles.extend(rc.get_attackable_tiles_from(p, dir, e))
     return tiles
+
+def repulsion_bias(my_pos, ally_positions, core_pos):
+    dx, dy = 0.0, 0.0
+    for pos in ally_positions:
+        diff_x = my_pos.x - pos.x
+        diff_y = my_pos.y - pos.y
+        cheby = max(abs(diff_x), abs(diff_y))
+        if cheby == 0:
+            continue
+        # Weight by 1/dist so nearby bots push harder
+        dx += diff_x / cheby
+        dy += diff_y / cheby
+
+    # Add weak pull toward core
+    core_dx = core_pos.x - my_pos.x
+    core_dy = core_pos.y - my_pos.y
+    cheby = max(abs(core_dx), abs(core_dy))
+    if cheby > 0:
+        dx += (core_dx / cheby) * 0.3
+        dy += (core_dy / cheby) * 0.3
+    
+    mag = max(abs(dx), abs(dy))  # Chebyshev normalize
+    if mag == 0:
+        return (0.0, 0.0)
+    return (dx / mag, dy / mag)
+
+def random_tile_biased(core_pos: Position, inner_dist: int, dist: int, map_width: int, map_height: int, bias_dir, bias_strength=0.5):
+    x_min = max(0, core_pos.x - dist)
+    x_max = min(map_width - 1,  core_pos.x + dist)
+    y_min = max(0, core_pos.y - dist)
+    y_max = min(map_height - 1, core_pos.y + dist)
+
+    mode_x = max(x_min, min(x_max, core_pos.x + bias_dir[0] * dist * bias_strength))
+    mode_y = max(y_min, min(y_max, core_pos.y + bias_dir[1] * dist * bias_strength))
+
+    while True:
+        x = round(random.triangular(x_min, x_max, mode_x))
+        y = round(random.triangular(y_min, y_max, mode_y))
+        if max(abs(x - core_pos.x), abs(y - core_pos.y)) >= inner_dist:
+            return Position(x, y)
+
+# Comms
+
+def pack_marker_value(round_num: int, syms: list[Symmetry]) -> int:
+    sym_bits = 0
+    for s in syms:
+        if s == Symmetry.ROTATIONAL: sym_bits |= 1 << 0
+        elif s == Symmetry.HORIZONTAL: sym_bits |= 1 << 1
+        elif s == Symmetry.VERTICAL: sym_bits |= 1 << 2
+    
+    return (round_num & 0x7FF) | ((sym_bits & 0x7) << 11)
+
+def unpack_round_sym(val: int) -> tuple[int, int]:
+    round_num = val & 0x7FF
+    sym_bits = (val >> 11) & 0x7
+    return round_num, sym_bits
+
+def filter_syms_by_bits(syms: list[Symmetry], bits: int) -> list[Symmetry]:
+    mask = {
+        Symmetry.ROTATIONAL: 1 << 0,
+        Symmetry.HORIZONTAL: 1 << 1,
+        Symmetry.VERTICAL:   1 << 2,
+    }
+    return [s for s in syms if bits & mask[s]]
