@@ -446,55 +446,38 @@ class BuilderBot(Bot):
         self.attack_from = self.attack_target.add(get_best_pathable_adj_with_diag(self.rc, self.attack_target, self.rc.get_position()))
         self.attack_return_to = last_state
 
-    def replace_if_needed(self) -> bool:
-        for t in self.sense.ally_transports:
-            bldg = self.rc.get_tile_building_id(t)
+    def replace_if_needed(self):
+        # If standing on conveyor/bridge -> we will tank hit so not considering for replacement
+
+        for d in DIRECTIONS:
+            adj = self.rc.get_position().add(d)
+            if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
+            if not adj in self.sense.ally_transports: continue
+
+            # We have an adjacent transport -> check for replacement condn
+            bldg = self.rc.get_tile_building_id(adj)
             hp = self.rc.get_hp(bldg)
-            
+
             dmg = 0
-            if t in self.sense.enemy_builders: dmg = 2
-            else: dmg = self.sense.turret_cost_map[self.sense.idx(t)]
-
-            entt = self.sense.get_entity(t)
-            if entt != EntityType.CONVEYOR and entt != EntityType.BRIDGE:
-                continue
-            if hp > dmg:
-                continue
-
+            dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
+            if adj in self.sense.ally_transports: dmg += 2
+            # if adj in self.sense.enemy_builders: dmg = 2
+            # else: dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
+            
+            if hp > dmg: continue
+            entt = self.sense.get_entity(adj)
             (ti, ax) = self.rc.get_global_resources()
-            can_build = ti > (self.rc.get_conveyor_cost()[0] if entt == EntityType.CONVEYOR else self.rc.get_bridge_cost()[0])
-            conveyor_dir = self.sense.get_direction(t) if entt == EntityType.CONVEYOR else None
-            bridge_target = self.rc.get_bridge_target(bldg) if entt == EntityType.BRIDGE else None
-
-            move_dir = None
-            can_destroy = False
-            if self.rc.get_position() != t:
-                can_destroy = True
-            else:
-                for d in DIRECTIONS:
-                    if self.rc.can_move(d):
-                        can_destroy = True
-                        if entt == EntityType.CONVEYOR:
-                            move_dir = d
-                        break
-
-            if can_destroy and can_build:
-                if move_dir is not None and self.rc.can_move(move_dir):
-                    self.rc.move(move_dir)
-                if self.rc.can_destroy(t):
-                    self.rc.destroy(t)
-
-                if entt == EntityType.CONVEYOR:
-                    if self.rc.can_build_conveyor(t, conveyor_dir):
-                        self.rc.build_conveyor(t, conveyor_dir)
-                    print("[REPLACE] Replaced conveyor at", t)
-                else:
-                    if self.rc.can_build_bridge(t, bridge_target):
-                        self.rc.build_bridge(t, bridge_target)
-                    print("[REPLACE] Replaced bridge at", t)
-                return True
-
-        return False
+            extra = None
+            if entt in ENTITY_DIRECTIONAL:
+                extra = self.sense.get_direction(adj)
+            if entt == EntityType.BRIDGE:
+                extra = self.rc.get_bridge_target(bldg)
+            if self.rc.can_build(entt, adj, extra) and self.rc.can_destroy(adj):
+                self.rc.destroy(adj)
+                self.rc.build(entt, adj, extra)
+                print("[REPLACE] Replaced", entt.name, "at", adj, "with hp", hp, "and incoming dmg", dmg)
+                return
+        return
 
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
@@ -511,7 +494,7 @@ class BuilderBot(Bot):
         #             return True
         #     return False # vulnerable building that needs healing
 
-        replace = self.replace_if_needed()
+        self.replace_if_needed()
         
         to_heal = None
         to_heal_dist = 100000
@@ -1120,7 +1103,8 @@ class BuilderBot(Bot):
             if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
             if self.sense.get_env(p) == Environment.WALL: continue
 
-            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
+            entt = self.sense.get_entity(p)
+            if entt == EntityType.MARKER or (entt != EntityType.ROAD and not self.sense.is_allied(p)):
                 if not try_destroy(self.rc, self.sense, pf, p): return
                 if self.rc.can_build_road(p): self.rc.build_road(p)
         pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
