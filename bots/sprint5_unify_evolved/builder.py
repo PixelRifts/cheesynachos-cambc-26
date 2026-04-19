@@ -1028,7 +1028,8 @@ class BuilderBot(Bot):
             if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
             if self.sense.get_env(p) == Environment.WALL: continue
 
-            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
+            entt = self.sense.get_entity(p)
+            if entt == EntityType.MARKER or (entt != EntityType.ROAD and not self.sense.is_allied(p)):
                 if not try_destroy(self.rc, self.sense, pf, p): return
                 if self.rc.can_build_road(p): self.rc.build_road(p)
         pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
