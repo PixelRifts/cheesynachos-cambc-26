@@ -500,6 +500,8 @@ class BuilderBot(Bot):
             if d < to_heal_dist:
                 to_heal_dist = d
                 to_heal = t
+            if d == to_heal_dist and self.rc.get_hp(self.rc.get_tile_building_id(t)) < self.rc.get_hp(self.rc.get_tile_building_id(to_heal)):
+                to_heal = t
         
         if to_heal is not None:
             moved = False
