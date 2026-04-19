@@ -361,6 +361,8 @@ class Sense:
             if self.rc.get_team(bb) == self.rc.get_team():
                 if self.rc.get_id() != bb:
                     self.ally_builders.add(t)
+                    if self.rc.get_hp(bb) < self.rc.get_max_hp(bb):
+                        self.heal_targets.append(t)
             else:
                 self.enemy_builders.add(t)
                 dist = chebyshev_distance(t, self.my_pos)
