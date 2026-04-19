@@ -51,7 +51,7 @@ class BotState(Enum):
     RECOVER_GOTO_CORE = "Core"
 
 NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY, BotState.DEFENCE_STALKING }
-HEAL_EXCLUDE_STATES =        { BotState.ECON_CONNECT }
+HEAL_EXCLUDE_STATES =        {  }
 MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 MICRO_DISRUPT_STATES =       { BotState.ATTACK_GOTO }
 MICRO_FOLLOW_ENABLE_STATES = { BotState.ATTACK_GOTO, BotState.ECON_EXPLORE, BotState.ECON_RETURN, BotState.DEFENCE_TO_HARVESTER, BotState.DEFENCE_TO_CORE }
@@ -133,6 +133,7 @@ class BuilderBot(Bot):
         self.econ_connect_launcher_count: int = 0
         self.econ_connect_current_run: list[Position] = []
         self.econ_connect_past_pos = self.rc.get_position()
+        self.econ_connect_blocked_by_own_turret = False
 
         # DEFENCE_LINE
         self.defence_is_to_core: bool = False
@@ -402,6 +403,7 @@ class BuilderBot(Bot):
         if best_poi is not None:
             last_state = self.state
             target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, best_poi, self.enemy_core_pos)
+            # Try @here different turret randomly
             plan = plan if best_already_has_sentinel else EntityType.SENTINEL
             self.switch_state(BotState.ATTACK_EXEC_PLAN)
             self.attack_target = target
@@ -426,6 +428,7 @@ class BuilderBot(Bot):
                 if self.sense.get_entity(p1) == EntityType.GUNNER:
                     already_targeted = True
                     break
+
                 if is_getting_ammo(self.rc, self.sense, p1) and (is_pos_turretable(self.rc, p1) or is_protecting_conveyor(self.rc, self.sense, p1)):
                     candidate_dir = d
                     turret_candidate = t
@@ -443,38 +446,55 @@ class BuilderBot(Bot):
         self.attack_from = self.attack_target.add(get_best_pathable_adj_with_diag(self.rc, self.attack_target, self.rc.get_position()))
         self.attack_return_to = last_state
 
-    def replace_if_needed(self):
-        # If standing on conveyor/bridge -> we will tank hit so not considering for replacement
-
-        for d in DIRECTIONS:
-            adj = self.rc.get_position().add(d)
-            if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
-            if not adj in self.sense.ally_transports: continue
-
-            # We have an adjacent transport -> check for replacement condn
-            bldg = self.rc.get_tile_building_id(adj)
+    def replace_if_needed(self) -> bool:
+        for t in self.sense.ally_transports:
+            bldg = self.rc.get_tile_building_id(t)
             hp = self.rc.get_hp(bldg)
-
-            dmg = 0
-            dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
-            if adj in self.sense.ally_transports: dmg += 2
-            # if adj in self.sense.enemy_builders: dmg = 2
-            # else: dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
             
-            if hp > dmg: continue
-            entt = self.sense.get_entity(adj)
+            dmg = 0
+            if t in self.sense.enemy_builders: dmg = 2
+            else: dmg = self.sense.turret_cost_map[self.sense.idx(t)]
+
+            entt = self.sense.get_entity(t)
+            if entt != EntityType.CONVEYOR and entt != EntityType.BRIDGE:
+                continue
+            if hp > dmg:
+                continue
+
             (ti, ax) = self.rc.get_global_resources()
-            extra = None
-            if entt in ENTITY_DIRECTIONAL:
-                extra = self.sense.get_direction(adj)
-            if entt == EntityType.BRIDGE:
-                extra = self.rc.get_bridge_target(bldg)
-            if self.rc.can_build(entt, adj, extra) and self.rc.can_destroy(adj):
-                self.rc.destroy(adj)
-                self.rc.build(entt, adj, extra)
-                print("[REPLACE] Replaced", entt.name, "at", adj, "with hp", hp, "and incoming dmg", dmg)
-                return
-        return
+            can_build = ti > (self.rc.get_conveyor_cost()[0] if entt == EntityType.CONVEYOR else self.rc.get_bridge_cost()[0])
+            conveyor_dir = self.sense.get_direction(t) if entt == EntityType.CONVEYOR else None
+            bridge_target = self.rc.get_bridge_target(bldg) if entt == EntityType.BRIDGE else None
+
+            move_dir = None
+            can_destroy = False
+            if self.rc.get_position() != t:
+                can_destroy = True
+            else:
+                for d in DIRECTIONS:
+                    if self.rc.can_move(d):
+                        can_destroy = True
+                        if entt == EntityType.CONVEYOR:
+                            move_dir = d
+                        break
+
+            if can_destroy and can_build:
+                if move_dir is not None and self.rc.can_move(move_dir):
+                    self.rc.move(move_dir)
+                if self.rc.can_destroy(t):
+                    self.rc.destroy(t)
+
+                if entt == EntityType.CONVEYOR:
+                    if self.rc.can_build_conveyor(t, conveyor_dir):
+                        self.rc.build_conveyor(t, conveyor_dir)
+                    print("[REPLACE] Replaced conveyor at", t)
+                else:
+                    if self.rc.can_build_bridge(t, bridge_target):
+                        self.rc.build_bridge(t, bridge_target)
+                    print("[REPLACE] Replaced bridge at", t)
+                return True
+
+        return False
 
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
@@ -491,7 +511,7 @@ class BuilderBot(Bot):
         #             return True
         #     return False # vulnerable building that needs healing
 
-        self.replace_if_needed()
+        replace = self.replace_if_needed()
         
         to_heal = None
         to_heal_dist = 100000
@@ -522,22 +542,24 @@ class BuilderBot(Bot):
                 print("[HEAL] Healed", to_heal)
                 # no return - allow checks
 
-            # my_pos = self.rc.get_position()
-            # has_enemy_targeting = False
-            # launcher_candidate = None
-            # for d in DIRECTIONS:
-            #     p = my_pos.add(d)
-            #     if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-            #     if p in self.sense.enemy_builders: has_enemy_targeting = True
-            #     if is_pos_quickly_turretable(self.rc, p): launcher_candidate = p
+            my_pos = self.rc.get_position()
+            has_enemy_targeting = False
+            launcher_candidate = None
+            for d in DIRECTIONS:
+                p = my_pos.add(d)
+                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+                if p in self.sense.enemy_builders: has_enemy_targeting = True
+                if is_pos_quickly_turretable(self.rc, p): launcher_candidate = p
             
-            # has_enough_ti = self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.LAUNCHER)
-            # if has_enemy_targeting and launcher_candidate is not None and \
-            #     has_enough_ti and not self.is_launcher_protected(my_pos):
-            #     if self.rc.can_destroy(launcher_candidate):
-            #         self.rc.destroy(launcher_candidate)
-            #     if self.rc.can_build_launcher(launcher_candidate):
-            #         self.rc.build_launcher(launcher_candidate)
+            has_enough_ti = self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.LAUNCHER) + 20
+            if has_enemy_targeting and launcher_candidate is not None and \
+                has_enough_ti and not self.is_launcher_protected(my_pos):
+                if self.rc.can_destroy(launcher_candidate):
+                    self.rc.destroy(launcher_candidate)
+                if self.rc.can_build_launcher(launcher_candidate):
+                    self.rc.build_launcher(launcher_candidate)
+                if self.rc.can_build_road(launcher_candidate):
+                    self.rc.build_road(launcher_candidate)
             return moved
 
     # Econ
@@ -550,6 +572,7 @@ class BuilderBot(Bot):
         for b in self.sense.bridges:
             if not self.rc.is_in_vision(b): continue
             bldg = self.rc.get_tile_building_id(b)
+            if self.sense.get_entity(b) != EntityType.BRIDGE: continue
             resource = self.rc.get_stored_resource(bldg)
             if not resource: continue
             tgt = self.rc.get_bridge_target(bldg)
@@ -572,6 +595,7 @@ class BuilderBot(Bot):
         for b in self.sense.conveyors:
             if not self.rc.is_in_vision(b): continue
             bldg = self.rc.get_tile_building_id(b)
+            if self.rc.get_entity_type(bldg) != EntityType.CONVEYOR: continue
             resource = self.rc.get_stored_resource(bldg)
             if b in self.sense.ally_builders: continue
             if not resource: continue
@@ -770,7 +794,7 @@ class BuilderBot(Bot):
             else:
                 goto = self.econ_target_ore if ore_has in ENTITY_WALKABLE else adj.add(get_best_empty_adj(self.rc, adj, self.core_pos))
                 
-                if try_destroy(self.rc, self.sense, goto, adj, ti_min=get_ti_cost(self.rc, the_entt_to_use)):
+                if try_destroy(self.rc, self.sense, goto, adj, ti_min=get_ti_cost(self.rc, the_entt_to_use)+20):
                     dir = micro.compute_best_turret_dir(self.rc, self.sense, adj, the_entt_to_use, self.enemy_core_pos) if the_entt_to_use != EntityType.CONVEYOR else d.opposite()
                     if self.rc.can_build(the_entt_to_use, adj, dir):
                         self.rc.build(the_entt_to_use, adj, dir)
@@ -792,7 +816,7 @@ class BuilderBot(Bot):
         # Validate Harvester
         if self.sense.get_entity(self.econ_target_ore) != EntityType.HARVESTER and is_adjacent(self.rc.get_position(), self.econ_target_ore):
             # print('trydestroy?')
-            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore, ti_min=get_ti_cost(self.rc, EntityType.HARVESTER)):
+            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore, ti_min=get_ti_cost(self.rc, EntityType.HARVESTER)+20):
                 return
             # print('trybuildharvester')
             if self.rc.can_build_harvester(self.econ_target_ore):
@@ -894,6 +918,9 @@ class BuilderBot(Bot):
                     self.econ_connect_past_pos = self.rc.get_position()
                 else:
                     self.econ_connect_past_pos = None
+                
+
+                        
 
     def econ_nuke(self):
         pass
@@ -922,7 +949,7 @@ class BuilderBot(Bot):
             self.switch_back_to_neutral(self.attack_return_to)
             return
         if not try_destroy(self.rc, self.sense, self.attack_from, self.attack_target, \
-            ti_min=get_ti_cost(self.rc, self.attack_plan) + get_ti_cost(self.rc, EntityType.ROAD)): return
+            ti_min=get_ti_cost(self.rc, self.attack_plan) + get_ti_cost(self.rc, EntityType.ROAD)+10): return
 
         # print('foundry setup', self.attack_target)
         match self.attack_plan:
@@ -1065,8 +1092,7 @@ class BuilderBot(Bot):
             if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
             if self.sense.get_env(p) == Environment.WALL: continue
 
-            entt = self.sense.get_entity(p)
-            if entt == EntityType.MARKER or (entt != EntityType.ROAD and not self.sense.is_allied(p)):
+            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
                 if not try_destroy(self.rc, self.sense, pf, p): return
                 if self.rc.can_build_road(p): self.rc.build_road(p)
         pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
