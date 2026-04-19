@@ -1742,6 +1742,7 @@ class BuilderBot(Bot):
 
             self.switch_state(BotState.ECON_RETURN)
             self.econ_target_ore = selection
+            self.econ_return_to()
         else:
             self.switch_state(BotState.ECON_EXPLORE)
             self.setup_econ_explore_target()
@@ -1767,3 +1768,4 @@ class BuilderBot(Bot):
         # dist = 0.025 * self.rc.get_current_round() + 30 # (0, 30) -> (800, 50)
         # dist = 0.05 * self.rc.get_current_round() + 20 # (0, 20) -> (600, 50)
         self.pathfind_target = random_tile_biased(self.core_pos, inner_dist, dist, self.sense.map_width, self.sense.map_height, bias_dir)
+        self.econ_explore()
