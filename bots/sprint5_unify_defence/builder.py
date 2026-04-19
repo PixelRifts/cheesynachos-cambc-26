@@ -839,88 +839,101 @@ class BuilderBot(Bot):
         # print('1')
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
             self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
-            print('recompute')
-            if self.econ_connect_current_is_final:
-                self.switch_to_possibly_patrol()
-                return
-
-            # Compute and cache target because it's wasteful to do everytime we enter this procedure
-            # print('2')
-            if self.econ_connect_saved_target is None:
-                self.econ_connect_saved_target, self.econ_connect_saved_is_final = self.compute_next_bridge_target(self.econ_target_is_ax)
-                self.econ_connect_protect_target = self.rc.get_position() # if self.econ_connect_current_target is None or self.econ_connect_saved_is_final else None
-                if self.econ_connect_saved_target is None:
-                    self.switch_to_econ()
-                    return
-                self.econ_connect_saved_is_bridge = self.should_bridge_heuristic(self.rc.get_position(), self.econ_connect_saved_target, BRIDGE_USAGE_CUTOFF) or \
-                    (self.econ_connect_saved_is_final and self.econ_target_is_ax)
-            self.rc.draw_indicator_dot(self.econ_connect_saved_target, 0, 0, 255)
+            self.recompute_econ_connect_target()
             
-            # print('3', self.econ_connect_saved_is_bridge)
-            if self.econ_connect_saved_is_bridge:
-                if not (self.sense.is_allied(self.rc.get_position()) and self.sense.get_entity(self.rc.get_position()) == EntityType.BRIDGE):
-                    if not try_destroy(self.rc, self.sense, self.rc.get_position(), self.rc.get_position()):
-                        return
-            
-                (ti, ax) = self.rc.get_global_resources()
-                if ti < 10: return
-                
-                if not self.rc.can_build_bridge(self.rc.get_position(), self.econ_connect_saved_target):
-                    return
-
-                self.rc.build_bridge(self.rc.get_position(), self.econ_connect_saved_target)
-                self.econ_connect_current_run.append(self.rc.get_position())
-            
-            # print('commit')
-            # Commit the cached target, then it'll be fine :)
-            self.econ_connect_past_pos = self.rc.get_position()
-            self.econ_connect_current_target = self.econ_connect_saved_target
-            self.econ_connect_current_is_bridge = self.econ_connect_saved_is_bridge
-            self.econ_connect_current_is_final = self.econ_connect_saved_is_final
-            self.econ_connect_protect_target = None
-            self.econ_connect_saved_target = None
-            self.econ_connect_saved_is_bridge = False
-            self.econ_connect_saved_is_final = False
-        
-        self.rc.draw_indicator_dot(self.econ_connect_current_target, 255, 0, 0)
-        # print('4')
-        # Main part
-        if self.econ_connect_current_is_bridge:
-            if self.econ_connect_current_is_final:
-                if self.econ_target_is_ax:
-                    last_state = self.state
-                    target_pos = self.econ_connect_current_target
-                    my_pos = self.rc.get_position()
-                    self.switch_state(BotState.ECON_PLACE_FOUNDRY)
-                    self.attack_target = target_pos
-                    self.attack_feeder = None
-                    self.attack_plan = EntityType.FOUNDRY
-                    self.attack_from = target_pos.add(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
-                    self.attack_return_to = last_state
-                else:
-                    self.switch_to_possibly_patrol()
-                return
-            
-            pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
-            if self.rc.is_in_vision(self.econ_connect_current_target):
-                entt = self.sense.get_entity(self.econ_connect_current_target)
-                allied = self.sense.is_allied(self.econ_connect_current_target)
-                if allied and entt in ENTITY_INFRASTRUCTURE:
-                    self.switch_to_possibly_patrol()
-                    return
-
         else:
+            self.rc.draw_indicator_dot(self.econ_connect_current_target, 255, 0, 0)
+            # print('4')
+            # Main part
+            if self.econ_connect_current_is_bridge:
+                if self.econ_connect_current_is_final:
+                    if self.econ_target_is_ax:
+                        last_state = self.state
+                        target_pos = self.econ_connect_current_target
+                        my_pos = self.rc.get_position()
+                        self.switch_state(BotState.ECON_PLACE_FOUNDRY)
+                        self.attack_target = target_pos
+                        self.attack_feeder = None
+                        self.attack_plan = EntityType.FOUNDRY
+                        self.attack_from = target_pos.add(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
+                        self.attack_return_to = last_state
+                    else:
+                        self.switch_to_possibly_patrol()
+                    return
+                
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
+                if self.rc.is_in_vision(self.econ_connect_current_target):
+                    entt = self.sense.get_entity(self.econ_connect_current_target)
+                    allied = self.sense.is_allied(self.econ_connect_current_target)
+                    if allied and entt in ENTITY_INFRASTRUCTURE:
+                        self.switch_to_possibly_patrol()
+                        return
+
+            # else:
             # print('5')
             if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
                 pathfind.silly_pathfind_to(self.rc, self.sense, self.econ_connect_past_pos)
+                print('if')
             else:
-                if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
-                    self.econ_connect_past_pos = self.rc.get_position()
-                else:
-                    self.econ_connect_past_pos = None
-                
+                if self.econ_connect_current_target is not None and self.econ_connect_current_target != self.rc.get_position():
+                    print("econ connect target", self.econ_connect_current_target)
+                    if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
+                        self.econ_connect_past_pos = self.rc.get_position()
+                        print('else - if')
+                    else:
+                        self.econ_connect_past_pos = None
+                        self.recompute_econ_connect_target()
+                        print('else - else')
 
-                        
+ 
+
+    def recompute_econ_connect_target(self):
+        print('recompute')
+        print('current pos', self.rc.get_position(), 'current target', self.econ_connect_current_target, 'protect target', self.econ_connect_protect_target, 'past pos', self.econ_connect_past_pos)
+        if self.econ_connect_current_is_final:
+            self.switch_to_possibly_patrol()
+            return
+
+        # Compute and cache target because it's wasteful to do everytime we enter this procedure
+        # print('2')
+        if self.econ_connect_saved_target is None:
+            self.econ_connect_saved_target, self.econ_connect_saved_is_final = self.compute_next_bridge_target(self.econ_target_is_ax)
+            self.econ_connect_protect_target = self.rc.get_position() # if self.econ_connect_current_target is None or self.econ_connect_saved_is_final else None
+            if self.econ_connect_saved_target is None:
+                self.switch_to_econ()
+                return
+            self.econ_connect_saved_is_bridge = self.should_bridge_heuristic(self.rc.get_position(), self.econ_connect_saved_target, BRIDGE_USAGE_CUTOFF) or \
+                (self.econ_connect_saved_is_final and self.econ_target_is_ax)
+        self.rc.draw_indicator_dot(self.econ_connect_saved_target, 0, 0, 255)
+        
+        # print('3', self.econ_connect_saved_is_bridge)
+        if self.econ_connect_saved_is_bridge:
+            print('current pos', self.rc.get_position(), 'target', self.econ_connect_saved_target)
+            if not (self.sense.is_allied(self.rc.get_position()) and self.sense.get_entity(self.rc.get_position()) == EntityType.BRIDGE):
+                if not try_destroy(self.rc, self.sense, self.rc.get_position(), self.rc.get_position(), ti_min=get_ti_cost(self.rc, EntityType.BRIDGE)+10) and not self.rc.is_tile_empty(self.rc.get_position()):
+                    print('failed to clear at', self.rc.get_position())
+                    return
+        
+            (ti, ax) = self.rc.get_global_resources()
+            if ti < 10: return
+            
+            if not self.rc.can_build_bridge(self.rc.get_position(), self.econ_connect_saved_target):
+                print('cant build bridge from', self.rc.get_position(), 'to', self.econ_connect_saved_target)
+                return
+
+            self.rc.build_bridge(self.rc.get_position(), self.econ_connect_saved_target)
+            self.econ_connect_current_run.append(self.rc.get_position())
+        
+        # print('commit')
+        # Commit the cached target, then it'll be fine :)
+        self.econ_connect_past_pos = self.rc.get_position()
+        self.econ_connect_current_target = self.econ_connect_saved_target
+        self.econ_connect_current_is_bridge = self.econ_connect_saved_is_bridge
+        self.econ_connect_current_is_final = self.econ_connect_saved_is_final
+        self.econ_connect_protect_target = None
+        self.econ_connect_saved_target = None
+        self.econ_connect_saved_is_bridge = False
+        self.econ_connect_saved_is_final = False
 
     def econ_nuke(self):
         pass
