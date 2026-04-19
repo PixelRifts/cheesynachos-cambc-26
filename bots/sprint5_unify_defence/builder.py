@@ -828,15 +828,18 @@ class BuilderBot(Bot):
         
         # print('post harvester validation')
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
+            print('[ECON_HARVESTER]', self.econ_target_ore)
             if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
                 is_ax = self.econ_target_is_ax
                 self.switch_state(BotState.ECON_CONNECT)
                 self.pathfind_target = self.core_pos
                 self.econ_target_is_ax = is_ax
+                self.recompute_econ_connect_target()
+                self.econ_connect()
 
     def econ_connect(self):
         # Compute next target part
-        # print('1')
+        print('[ECONCONNECT]')
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
             self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
             self.recompute_econ_connect_target()
