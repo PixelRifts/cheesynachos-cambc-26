@@ -52,7 +52,7 @@ class BotState(Enum):
 
 NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY, BotState.DEFENCE_STALKING }
 HEAL_EXCLUDE_STATES =        { BotState.ECON_CONNECT }
-MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
+MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ECON_PLACE_FOUNDRY }
 MICRO_DISRUPT_STATES =       { BotState.ATTACK_GOTO }
 MICRO_FOLLOW_ENABLE_STATES = { BotState.ATTACK_GOTO, BotState.ECON_EXPLORE, BotState.ECON_RETURN, BotState.DEFENCE_TO_HARVESTER, BotState.DEFENCE_TO_CORE }
 
@@ -152,6 +152,7 @@ class BuilderBot(Bot):
         self.attack_from: Position = None
         self.attack_return_to = None
         self.attack_plan_timeout = 30
+        self.current_micro_score = 0
         
     def switch_state(self, state: BotState):
         self.state = state
@@ -288,9 +289,10 @@ class BuilderBot(Bot):
         my_pos = self.rc.get_position()
         for b in self.sense.enemy_builders:
             if not self.rc.is_in_vision(b): continue
+            if not self.sense.is_reachable(b): return (False, Direction.CENTRE)
             bb = self.rc.get_tile_builder_bot_id(b)
             d = self.rc.get_position(bb).distance_squared(my_pos)
-            
+
             invalid = False
             for dir in DIRECTIONS:
                 adj = b.add(dir)
@@ -315,12 +317,13 @@ class BuilderBot(Bot):
             rsc = self.rc.get_stored_resource_id(bldg)
             if self.rc.is_in_vision(t) and self.rc.get_tile_builder_bot_id(t) is not None: continue
             if bldg in self.attack_disrupt_cache:
-                if rsc != self.attack_disrupt_cache[bldg]:
+                if rsc != self.attack_disrupt_cache[bldg] and self.current_micro_score < best_score:
                     last_state = self.state
                     self.attack_disrupt_cache[bldg] = rsc
                     frm = t.add(get_best_pathable_adj_with_diag(self.rc, t, self.rc.get_position()))
                     self.switch_state(BotState.ATTACK_EXEC_PLAN)
                     self.attack_target = t
+                    self.current_micro_score = 40
                     self.attack_plan = EntityType.BARRIER
                     self.attack_from = frm
                     self.attack_return_to = last_state
@@ -395,7 +398,7 @@ class BuilderBot(Bot):
                     best_already_has_sentinel = False
                 if self.rc.get_cpu_time_elapsed() > budget: break
 
-        if best_poi is not None:
+        if best_poi is not None and self.current_micro_score < best_score:
             last_state = self.state
             target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, best_poi, self.enemy_core_pos)
             plan = plan if best_already_has_sentinel else EntityType.SENTINEL
@@ -404,6 +407,7 @@ class BuilderBot(Bot):
             self.attack_plan = plan
             self.attack_from = frm
             self.attack_return_to = last_state
+            self.current_micro_score = best_score
             self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
             return True
         return False
@@ -436,6 +440,7 @@ class BuilderBot(Bot):
         self.attack_target = p
         self.attack_plan = EntityType.GUNNER
         self.attack_plan_dir = candidate_dir.opposite()
+        self.current_micro_score = 110
         self.attack_from = self.attack_target.add(get_best_pathable_adj_with_diag(self.rc, self.attack_target, self.rc.get_position()))
         self.attack_return_to = last_state
 
@@ -1020,6 +1025,9 @@ class BuilderBot(Bot):
         for a,b in ds:
             pf = self.core_pos.add(a)
             p = pf.add(b)
+            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+            if self.sense.get_env(p) == Environment.WALL: continue
+
             if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
                 if not try_destroy(self.rc, self.sense, pf, p): return
                 if self.rc.can_build_road(p): self.rc.build_road(p)
@@ -1292,6 +1300,7 @@ class BuilderBot(Bot):
                 return (False, Direction.CENTRE)
                 
         if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
+        if not self.sense.is_reachable(pos): return (False, Direction.CENTRE)
         entt = self.sense.get_entity(pos)
         allied = self.sense.is_allied(pos)
         if entt in ENTITY_TURRET or entt == EntityType.FOUNDRY: return (False, Direction.CENTRE)
@@ -1632,7 +1641,8 @@ class BuilderBot(Bot):
     def switch_to_possibly_patrol(self):
         # print('possiblypatrol before', self.rc.get_cpu_time_elapsed())
         # patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)
-        patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
+        # patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
+        patrol_condition = random.randint(0, 1) == 0
         # print('possiblypatrol after', self.rc.get_cpu_time_elapsed())
         if not patrol_condition:
             self.switch_to_econ()
@@ -1667,7 +1677,8 @@ class BuilderBot(Bot):
         map_size = max(self.sense.map_width, self.sense.map_height)
 
         inner_dist = 5
-        dist = 0.037 * self.rc.get_current_round() + 20 # (0, 20) -> (800, 50)
+        dist = 0.02 * self.rc.get_current_round() + 20
+        # dist = 0.037 * self.rc.get_current_round() + 20 # (0, 20) -> (800, 50)
         # dist = 0.025 * self.rc.get_current_round() + 30 # (0, 30) -> (800, 50)
         # dist = 0.05 * self.rc.get_current_round() + 20 # (0, 20) -> (600, 50)
         self.pathfind_target = random_tile_biased(self.core_pos, inner_dist, dist, self.sense.map_width, self.sense.map_height, bias_dir)

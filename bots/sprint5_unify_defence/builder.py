@@ -445,10 +445,13 @@ class BuilderBot(Bot):
 
     def replace_if_needed(self) -> bool:
         for t in self.sense.ally_transports:
-            bldg = self.sense.tile_bldg_cache[t]
+            bldg = self.rc.get_tile_building_id(t)
             hp = self.rc.get_hp(bldg)
-            dmg = self.sense.turret_cost_map[self.sense.idx(t)]
-            if t in self.sense.enemy_builders: dmg += 2
+            
+            dmg = 0
+            if t in self.sense.enemy_builders: dmg = 2
+            else: dmg = self.sense.turret_cost_map[self.sense.idx(t)]
+
             entt = self.sense.get_entity(t)
             if entt != EntityType.CONVEYOR and entt != EntityType.BRIDGE:
                 continue
@@ -1074,10 +1077,12 @@ class BuilderBot(Bot):
         for a,b in ds:
             pf = self.core_pos.add(a)
             p = pf.add(b)
+            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+            if self.sense.get_env(p) == Environment.WALL: continue
+
             if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
                 if not try_destroy(self.rc, self.sense, pf, p): return
                 if self.rc.can_build_road(p): self.rc.build_road(p)
-        
         pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
 
     # Attack
@@ -1347,6 +1352,7 @@ class BuilderBot(Bot):
                 return (False, Direction.CENTRE)
                 
         if not self.rc.is_in_vision(pos): return (False, Direction.CENTRE)
+        if not self.sense.is_reachable(pos): return (False, Direction.CENTRE)
         entt = self.sense.get_entity(pos)
         allied = self.sense.is_allied(pos)
         if entt in ENTITY_TURRET or entt == EntityType.FOUNDRY: return (False, Direction.CENTRE)
@@ -1722,7 +1728,8 @@ class BuilderBot(Bot):
         map_size = max(self.sense.map_width, self.sense.map_height)
 
         inner_dist = 5
-        dist = 0.037 * self.rc.get_current_round() + 20 # (0, 20) -> (800, 50)
+        dist = 0.02 * self.rc.get_current_round() + 20
+        # dist = 0.037 * self.rc.get_current_round() + 20 # (0, 20) -> (800, 50)
         # dist = 0.025 * self.rc.get_current_round() + 30 # (0, 30) -> (800, 50)
         # dist = 0.05 * self.rc.get_current_round() + 20 # (0, 20) -> (600, 50)
         self.pathfind_target = random_tile_biased(self.core_pos, inner_dist, dist, self.sense.map_width, self.sense.map_height, bias_dir)
