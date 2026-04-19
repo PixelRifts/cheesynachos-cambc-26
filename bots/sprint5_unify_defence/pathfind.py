@@ -637,69 +637,103 @@ def recompute_silly_virtual_target(rc: Controller, sense: Sense):
 def silly_pathfind_to_virtual(rc: Controller, sense: Sense):
     global pf_state
 
-    my_loc = rc.get_position()
-    goal = pf_state.virtual_target
-    _ENV_WALL              = Environment.WALL
-    _ENV_COSTS             = ENV_COSTS
-    _ENTITY_COSTS          = ENTITY_COSTS_FAST
-    _turret_cost_map       = sense.turret_cost_map
+    map_w = sense.map_width
+    map_h = sense.map_height
 
-    if my_loc == goal:
+    my_pos   = rc.get_position()
+    goal_pos = pf_state.virtual_target
+
+    my_x,   my_y   = my_pos.x,   my_pos.y
+    goal_x, goal_y = goal_pos.x, goal_pos.y
+
+    my_flat   = my_y   * map_w + my_x
+    goal_flat = goal_y * map_w + goal_x
+
+    if my_flat == goal_flat:
         return
 
-    dist = {goal: 0}
-    parent = {}
-    heap = [(0, goal)]
+    _ENV_COSTS         = ENV_COSTS
+    _ENTITY_COSTS      = ENTITY_COSTS_FAST
+    _is_seen           = sense.is_seen_idxd
+    _get_env           = sense.get_env_idxd
+    _get_entity        = sense.get_entity_idxd
+    _is_allied         = sense.is_allied_idxd
+    _WALL              = Environment.WALL
+    _get_tile_builder  = rc.get_tile_builder_bot_id
+    _actually_navvable = actually_navvable_fast
+    my_id              = rc.get_id()
 
-    found = False
+    DIR_TABLE = (
+        ( 0, -1, -map_w     ),
+        ( 0,  1,  map_w     ),
+        ( 1,  0,  1         ),
+        (-1,  0, -1         ),
+        ( 1, -1,  1 - map_w ),
+        (-1, -1, -1 - map_w ),
+        ( 1,  1,  1 + map_w ),
+        (-1,  1, -1 + map_w ),
+    )
+
+    dist   = {goal_flat: 0}
+    parent = {}
+    heap   = [(0, goal_flat)]
+    found  = False
 
     while heap:
         dcur, cur = heappop(heap)
 
-        if cur == my_loc:
+        if cur == my_flat:
             found = True
             break
 
         if dcur > dist[cur]:
             continue
 
-        for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
-            nxt = cur.add(d)
+        cx = cur % map_w
+        cy = cur // map_w
 
-            if not actually_navvable(rc, nxt):
+        for dx, dy, d_delta in DIR_TABLE:
+            nxt_x = cx + dx
+            nxt_y = cy + dy
+            if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h:
                 continue
 
-            bbid = rc.get_tile_builder_bot_id(nxt)
-            if bbid is not None and bbid != rc.get_id():
+            nxt = cur + d_delta
+
+            if not _actually_navvable(rc, sense, nxt, map_w, map_h):
                 continue
 
-            # define weight here
+            bbid = _get_tile_builder(POSITION_CACHE[nxt])
+            if bbid is not None and bbid != my_id:
+                continue
+
             cost = 1
-            if sense.is_seen(nxt):
-                env = sense.get_env(nxt)
-                if env == Environment.WALL: continue
-                
-                entt   = sense.get_entity(nxt)
-                allied = sense.is_allied(nxt)
+            if _is_seen(nxt):
+                env = _get_env(nxt)
+                if env == _WALL:
+                    continue
+                entt   = _get_entity(nxt)
+                allied = _is_allied(nxt)
                 cost  += _ENV_COSTS[env]
                 cost  += _ENTITY_COSTS[entt][1 - int(allied)]
-                # cost  += _turret_cost_map[sense.idx(nxt)]
                 if cost >= 100000:
                     continue
 
             nd = dcur + cost
-
             if nxt not in dist or nd < dist[nxt]:
                 dist[nxt] = nd
                 parent[nxt] = cur
                 heappush(heap, (nd, nxt))
 
     if not found:
-        pf_state.virtual_target = my_loc
+        pf_state.virtual_target = my_pos
         return
 
-    best_pos = parent[my_loc]
-    best_dir = my_loc.direction_to(best_pos)
+    # Reconstruct direction from flat indexes one Position allocation total,
+    # outside the hot loop, only when a path was actually found.
+    best_flat = parent[my_flat]
+    best_pos  = Position(best_flat % map_w, best_flat // map_w)
+    best_dir  = my_pos.direction_to(best_pos)
 
     if rc.can_destroy(best_pos) and should_destroy(rc, best_pos):
         rc.destroy(best_pos)
@@ -710,7 +744,6 @@ def silly_pathfind_to_virtual(rc: Controller, sense: Sense):
         rc.build_road(best_pos)
         if rc.can_move(best_dir):
             rc.move(best_dir)
-
 
 
 # Silly Helpers
@@ -806,6 +839,27 @@ def actually_navvable(rc: Controller, pos: Position) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()) or not rc.is_in_vision(pos):
         return False
     return is_pos_pathable(rc, pos)
+
+def actually_navvable_fast(rc: Controller, sense: Sense, nxt: int, map_w: int, map_h: int) -> bool:
+    # Bounds and vision check on flat index.
+    nxt_x = nxt % map_w
+    nxt_y = nxt // map_w
+    if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h:
+        return False
+    nxtpos = POSITION_CACHE[nxt]
+    if not rc.is_in_vision(nxtpos):
+        return False
+
+    # Inlined is_pos_pathable.
+    entt = sense.get_entity_idxd(nxt)
+    env = sense.get_env_idxd(nxt)
+    if entt == None or rc.is_tile_passable(nxtpos): return True
+    if env == Environment.WALL: return False
+    allied = sense.is_allied_idxd(nxt)
+    if entt in ENTITY_WALKABLE: return True
+    if allied: return entt in ENTITY_CORE
+    return False
+
 
 def should_destroy(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)

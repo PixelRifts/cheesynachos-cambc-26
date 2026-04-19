@@ -51,7 +51,7 @@ class BotState(Enum):
     RECOVER_GOTO_CORE = "Core"
 
 NO_STUCK_DETECTION_STATES =  { BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY, BotState.DEFENCE_STALKING }
-HEAL_EXCLUDE_STATES =        { BotState.ECON_CONNECT }
+HEAL_EXCLUDE_STATES =        {  }
 MICRO_EXCLUDE_STATES =       { BotState.ECON_EXPLORE, BotState.ECON_CONNECT, BotState.CORE_HEALER, BotState.ECON_TARGET, BotState.ATTACK_EXEC_PLAN, BotState.ECON_PLACE_FOUNDRY }
 MICRO_DISRUPT_STATES =       { BotState.ATTACK_GOTO }
 MICRO_FOLLOW_ENABLE_STATES = { BotState.ATTACK_GOTO, BotState.ECON_EXPLORE, BotState.ECON_RETURN, BotState.DEFENCE_TO_HARVESTER, BotState.DEFENCE_TO_CORE }
@@ -446,38 +446,55 @@ class BuilderBot(Bot):
         self.attack_from = self.attack_target.add(get_best_pathable_adj_with_diag(self.rc, self.attack_target, self.rc.get_position()))
         self.attack_return_to = last_state
 
-    def replace_if_needed(self):
-        # If standing on conveyor/bridge -> we will tank hit so not considering for replacement
-
-        for d in DIRECTIONS:
-            adj = self.rc.get_position().add(d)
-            if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
-            if not adj in self.sense.ally_transports: continue
-
-            # We have an adjacent transport -> check for replacement condn
-            bldg = self.rc.get_tile_building_id(adj)
+    def replace_if_needed(self) -> bool:
+        for t in self.sense.ally_transports:
+            bldg = self.rc.get_tile_building_id(t)
             hp = self.rc.get_hp(bldg)
-
-            dmg = 0
-            dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
-            if adj in self.sense.ally_transports: dmg += 2
-            # if adj in self.sense.enemy_builders: dmg = 2
-            # else: dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
             
-            if hp > dmg: continue
-            entt = self.sense.get_entity(adj)
+            dmg = 0
+            if t in self.sense.enemy_builders: dmg = 2
+            else: dmg = self.sense.turret_cost_map[self.sense.idx(t)]
+
+            entt = self.sense.get_entity(t)
+            if entt != EntityType.CONVEYOR and entt != EntityType.BRIDGE:
+                continue
+            if hp > dmg:
+                continue
+
             (ti, ax) = self.rc.get_global_resources()
-            extra = None
-            if entt in ENTITY_DIRECTIONAL:
-                extra = self.sense.get_direction(adj)
-            if entt == EntityType.BRIDGE:
-                extra = self.rc.get_bridge_target(bldg)
-            if self.rc.can_build(entt, adj, extra) and self.rc.can_destroy(adj):
-                self.rc.destroy(adj)
-                self.rc.build(entt, adj, extra)
-                print("[REPLACE] Replaced", entt.name, "at", adj, "with hp", hp, "and incoming dmg", dmg)
-                return
-        return
+            can_build = ti > (self.rc.get_conveyor_cost()[0] if entt == EntityType.CONVEYOR else self.rc.get_bridge_cost()[0])
+            conveyor_dir = self.sense.get_direction(t) if entt == EntityType.CONVEYOR else None
+            bridge_target = self.rc.get_bridge_target(bldg) if entt == EntityType.BRIDGE else None
+
+            move_dir = None
+            can_destroy = False
+            if self.rc.get_position() != t:
+                can_destroy = True
+            else:
+                for d in DIRECTIONS:
+                    if self.rc.can_move(d):
+                        can_destroy = True
+                        if entt == EntityType.CONVEYOR:
+                            move_dir = d
+                        break
+
+            if can_destroy and can_build:
+                if move_dir is not None and self.rc.can_move(move_dir):
+                    self.rc.move(move_dir)
+                if self.rc.can_destroy(t):
+                    self.rc.destroy(t)
+
+                if entt == EntityType.CONVEYOR:
+                    if self.rc.can_build_conveyor(t, conveyor_dir):
+                        self.rc.build_conveyor(t, conveyor_dir)
+                    print("[REPLACE] Replaced conveyor at", t)
+                else:
+                    if self.rc.can_build_bridge(t, bridge_target):
+                        self.rc.build_bridge(t, bridge_target)
+                    print("[REPLACE] Replaced bridge at", t)
+                return True
+
+        return False
 
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
@@ -494,7 +511,7 @@ class BuilderBot(Bot):
         #             return True
         #     return False # vulnerable building that needs healing
 
-        self.replace_if_needed()
+        replace = self.replace_if_needed()
         
         to_heal = None
         to_heal_dist = 100000
@@ -895,40 +912,10 @@ class BuilderBot(Bot):
             if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
                 pathfind.silly_pathfind_to(self.rc, self.sense, self.econ_connect_past_pos)
             else:
-                next_pos = None if len(pathfind.pf_state.result_path) == 0 else pathfind.pf_state.result_path[0]
-                if type(next_pos) is int: next_pos = None
-                if self.econ_connect_blocked_by_own_turret and len(self.sense.enemy_turrets) == 0 and len(self.sense.enemy_builders) == 0:
-                    if self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.ROAD) + 10:
-                        if self.rc.can_destroy(next_pos):
-                            self.rc.destroy(next_pos)
-                        if self.rc.can_build_road(next_pos):
-                            self.rc.build_road(next_pos)
-                
-                if not self.econ_connect_blocked_by_own_turret:
-                    if next_pos is not None and self.rc.get_current_round() > 50:
-                        if len(self.sense.enemy_turrets) == 0 and len(self.sense.enemy_builders) == 0: return
-                        if not is_pos_quickly_turretable(self.rc, next_pos): return
-                        score, skip = micro.score_attack_poi(self.rc, self.sense, next_pos, self.core_pos)
-                        if not skip:
-                            # target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, next_pos, self.enemy_core_pos)
-                            target = next_pos
-                            turret_dir = micro.compute_best_turret_dir(self.rc, self.sense, target, EntityType.SENTINEL, self.enemy_core_pos)
-                            if self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.SENTINEL) + 20:
-                                if self.rc.can_destroy(target):
-                                    self.rc.destroy(target)
-                                if self.rc.can_build(EntityType.SENTINEL, target, turret_dir):
-                                    self.rc.build(EntityType.SENTINEL, target, turret_dir)
-                                    print("hello", self.rc.get_current_round(), target, file=sys.stderr)
-                                if self.rc.can_build_road(target):
-                                    self.rc.build_road(target)
-                                self.econ_connect_blocked_by_own_turret = True
-                            pass
-
-                if not self.econ_connect_blocked_by_own_turret:
-                    if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
-                        self.econ_connect_past_pos = self.rc.get_position()
-                    else:
-                        self.econ_connect_past_pos = None
+                if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
+                    self.econ_connect_past_pos = self.rc.get_position()
+                else:
+                    self.econ_connect_past_pos = None
                 
 
                         
@@ -1103,8 +1090,7 @@ class BuilderBot(Bot):
             if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
             if self.sense.get_env(p) == Environment.WALL: continue
 
-            entt = self.sense.get_entity(p)
-            if entt == EntityType.MARKER or (entt != EntityType.ROAD and not self.sense.is_allied(p)):
+            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
                 if not try_destroy(self.rc, self.sense, pf, p): return
                 if self.rc.can_build_road(p): self.rc.build_road(p)
         pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)

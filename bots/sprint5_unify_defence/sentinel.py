@@ -70,6 +70,7 @@ class Sentinel(Bot):
                     continue
                 score =  priorities[EntityType.BUILDER_BOT]
                 score -= ((self.rc.get_hp(bb) / self.attack_dmg) * 10)
+                print(score)
                 valid = True
                 
             if valid and score > priority and self.rc.can_fire(p):
