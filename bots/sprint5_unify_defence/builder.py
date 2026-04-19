@@ -831,7 +831,7 @@ class BuilderBot(Bot):
         # Validate Harvester
         if self.sense.get_entity(self.econ_target_ore) != EntityType.HARVESTER and is_adjacent(self.rc.get_position(), self.econ_target_ore):
             # print('trydestroy?')
-            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore, ti_min=get_ti_cost(self.rc, EntityType.HARVESTER)+20):
+            if not try_destroy(self.rc, self.sense, self.pathfind_target, self.econ_target_ore, ti_min=get_ti_cost(self.rc, EntityType.HARVESTER)+20) and not self.rc.is_tile_empty(self.econ_target_ore):
                 return
             # print('trybuildharvester')
             if self.rc.can_build_harvester(self.econ_target_ore):
@@ -849,7 +849,8 @@ class BuilderBot(Bot):
             self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
             self.recompute_econ_connect_target()
             
-        else:
+        if not (self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
+            self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None):
             self.rc.draw_indicator_dot(self.econ_connect_current_target, 255, 0, 0)
             # print('4')
             # Main part
