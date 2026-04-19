@@ -71,7 +71,6 @@ class PFState:
         self.goal = None
         self.best_node = None
         self.best_h = 10000000000000
-        self.is_cardinal = False
 
         self.open_set.clear()
         self.closed_set.clear()
@@ -110,7 +109,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
     # start / restart A*
     if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
-        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position() or pf_state.is_cardinal):
+        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
@@ -308,10 +307,9 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         return True
 
     # start / restart A*
-    if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target or not pf_state.is_cardinal):
+    if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target):
         print('got reset')
         pf_state.reset()
-        pf_state.is_cardinal = True
         pf_state.astar_active = True
         pf_state.goal = target
 
