@@ -76,8 +76,8 @@ class Core(Bot):
         target = 3 + turn // 50
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:
-            # if (self.rush_count - INIT_RUSH) % RUSH_GROUP_SIZE == 0:
-            #     self.spawn_rush()
+            if (self.rush_count - INIT_RUSH) % RUSH_GROUP_SIZE != 0:
+                self.spawn_rush()
             if self.econ_count <= 2*self.rush_count:
                 self.spawn_econ()
                 return
