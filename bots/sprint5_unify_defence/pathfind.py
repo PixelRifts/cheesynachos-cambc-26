@@ -367,14 +367,14 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         else:
             conveyor_dir = d.opposite()
 
+        allied = sense.is_allied(next_pos)
         bb = rc.get_tile_builder_bot_id(next_pos)
-        if bb is not None and rc.get_id() != bb:
+        if bb is not None and rc.get_id() != bb and not (sense.get_entity(next_pos) == EntityType.CORE and allied):
             print('blocked')
             return # Wait a turn if blocked by a guy
 
         # Actually move
         moved = False
-        allied = sense.is_allied(next_pos)
         if allied and next_pos != pf_state.goal:
             if rc.can_destroy(next_pos): rc.destroy(next_pos)
         else:
