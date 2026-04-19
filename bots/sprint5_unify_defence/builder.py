@@ -720,6 +720,19 @@ class BuilderBot(Bot):
             self.econ_target_is_ax = is_ax
 
     def econ_target(self):
+
+        # print('post harvester validation')
+        if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
+            # print('[ECON_HARVESTER]', self.econ_target_ore)
+            if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
+                is_ax = self.econ_target_is_ax
+                self.switch_state(BotState.ECON_CONNECT)
+                self.pathfind_target = self.core_pos
+                self.econ_target_is_ax = is_ax
+                self.recompute_econ_connect_target()
+                self.econ_connect()
+                return
+
         closest_ore = None
         closest_ore_dir = Direction.CENTRE
         closest_ore_is_ax = False
@@ -753,6 +766,7 @@ class BuilderBot(Bot):
         # print('confirm status')
         should_connect, direction = self.should_connect_to_ore(self.econ_target_ore, self.econ_target_is_ax, True)
         if not should_connect or direction == Direction.CENTRE:
+            print('should connect:', should_connect, 'direction:', direction)
             self.switch_to_econ()
             return
         self.pathfind_target = self.econ_target_ore.add(direction)
@@ -762,6 +776,7 @@ class BuilderBot(Bot):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
             if pathfind.pf_state.failed:
                 self.harvester_blacklist.add(self.econ_target_ore)
+                print('switching to econ due to pf fail')
                 self.switch_to_econ()
             return
         ore_has = self.sense.get_entity(self.econ_target_ore)
@@ -826,20 +841,10 @@ class BuilderBot(Bot):
                 # (ti, ax) = self.rc.get_global_resources()
                 return
         
-        # print('post harvester validation')
-        if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
-            print('[ECON_HARVESTER]', self.econ_target_ore)
-            if pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target):
-                is_ax = self.econ_target_is_ax
-                self.switch_state(BotState.ECON_CONNECT)
-                self.pathfind_target = self.core_pos
-                self.econ_target_is_ax = is_ax
-                self.recompute_econ_connect_target()
-                self.econ_connect()
 
     def econ_connect(self):
         # Compute next target part
-        print('[ECONCONNECT]')
+        # print('[ECONCONNECT]')
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
             self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
             self.recompute_econ_connect_target()
