@@ -85,7 +85,9 @@ class Sense:
 
         self.heal_targets: list[Position] = []
         self.enemy_turrets: list[Position] = []
+        self.enemy_launchers: list[Position] = []
         self.ally_turrets: list[Position] = []
+        self.ally_launchers: list[Position] = []
         self.enemy_transports: list[Position] = []
         self.bridges: list[Position] = []
         self.conveyors: list[Position] = []
@@ -210,7 +212,9 @@ class Sense:
         self.heal_targets.clear()
         self.transport_attack_blacklist.clear()
         self.enemy_turrets.clear()
+        self.enemy_launchers.clear()
         self.ally_turrets.clear()
+        self.ally_launchers.clear()
         self.enemy_transports.clear()
         self.bridges.clear()
         self.conveyors.clear()
@@ -344,6 +348,8 @@ class Sense:
         if not allied:
             if entt in ENTITY_TURRET:
                 self.enemy_turrets.append(t)
+                if entt == EntityType.LAUNCHER:
+                    self.enemy_launchers.append(t)
             elif entt in ENTITY_TRANSPORT:
                 self.enemy_transports.append(t)
         else:
@@ -351,6 +357,8 @@ class Sense:
 
             if entt in ENTITY_TURRET:
                 self.ally_turrets.append(t)
+                if entt == EntityType.LAUNCHER:
+                    self.ally_launchers.append(t)
             elif entt in ENTITY_TRANSPORT:
                 self.ally_transports.append(t)
                 
