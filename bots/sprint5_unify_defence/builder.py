@@ -452,18 +452,31 @@ class BuilderBot(Bot):
         self.attack_return_to = last_state
 
     def counter_launcher(self):
+        strong_counter = False
         target = None
         for l in self.sense.enemy_launchers:
             for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
                 adj = l.add(d)
                 if not self.rc.is_in_vision(adj): continue
-                if adj in self.sense.ally_transports:
+                if adj in self.sense.ally_transports or adj in self.sense.harvesters:
                     t = adj.add(d)
                     if not self.rc.is_in_vision(t): continue
-                    if t in self.sense.ally_launchers: break
+                    if t in self.sense.ally_launchers: 
+                        strong_counter = True
+                        break
                     if is_pos_quickly_turretable(self.rc, t):
                         target = t
+                        strong_counter = True
                         break
+            if strong_counter: break
+            for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
+                adj = l.add(d)
+                if not self.rc.is_in_vision(adj): continue
+                if adj in self.sense.ally_transports or adj in self.sense.harvesters:
+                    t = adj.add(d.rotate_left().rotate_left())
+                    if not self.rc.is_in_vision(t): continue
+                    if is_pos_quickly_turretable(self.rc, t):
+                        target = t       
 
         if target is None: return False
         moved = False
