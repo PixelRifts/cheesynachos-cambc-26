@@ -4,6 +4,7 @@ from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position
 from helpers import *
 from collections import deque
+import sense
 
 AXIONITE_STOCKPILE_THRESHOLD_ROUND = 1200
 AXIONITE_MIN_STOCKPILE = 41
@@ -15,10 +16,16 @@ class Core(Bot):
     def __init__(self, rc: Controller):
         super().__init__(rc)
         self.core = rc.get_position()
+        self.sense = sense.Sense(rc)
         self.econ_count = 0
         self.rush_count = 0
         self.healer_count = 0
+        
         self.ti_tracker = deque(maxlen=24)
+        self.rate       = 0
+        self.ore_count  = 0
+        self.core_feeders = set()
+
         self.active_rescue_ops = deque(maxlen=8)
         self.ore_dir = None
         map_center = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
@@ -30,6 +37,7 @@ class Core(Bot):
         self.active_rescue_ops.append(bldg_id)
 
     def start_turn(self):
+
         ti, ax = self.rc.get_global_resources()
 
         if self.rc.get_current_round() < AXIONITE_STOCKPILE_THRESHOLD_ROUND:
@@ -55,7 +63,27 @@ class Core(Bot):
                     return
 
     def turn(self):
+        self.sense.update()
         turn = self.rc.get_current_round()
+        # if turn > 400:
+        #     adj
+        if turn % 4 == 0:
+            self.rate = self.ore_count
+            self.ore_count = 0
+        
+        for d in DIRECTIONS:
+            adj = self.core.add(d)
+            self.core_feeders |= self.sense.get_feeders_of(adj)
+        
+        for f in self.core_feeders:
+            #print("entity at core feeder", f, "is", self.sense.get_entity(f))
+            if self.sense.get_entity(f) not in ENTITY_TRANSPORT:
+                continue
+            id = self.rc.get_tile_building_id(f)
+            
+            print("core feeder", f, "building", id, "stored resource", self.rc.get_stored_resource(id))
+            if self.rc.get_stored_resource(id) == ResourceType.TITANIUM:
+                self.ore_count += 1
 
         # For first enemy spotted -> spawn healer immediately.
         # For subsequent enemies, spawn healer if we have one and if we need one.
@@ -65,6 +93,14 @@ class Core(Bot):
         if self.healer_count < 1:
             _ = self.spawn_healer()
 
+        if self.rush_count < INIT_RUSH:
+            self.spawn_rush()
+            return
+
+        if self.econ_count < 2:
+            self.spawn_econ()
+            return
+
         dmg_bldg = self.healer_needed()
 
         if dmg_bldg is not None:
@@ -73,21 +109,32 @@ class Core(Bot):
                 self.mark_rescue_operation(dmg_bldg)
                 return
         
-        target = 3 + turn // 50
-        print(target, self.econ_count, self.rush_count)
-        if self.econ_count + self.rush_count < target:
-            if (self.rush_count - INIT_RUSH) % RUSH_GROUP_SIZE != 0:
-                self.spawn_rush()
-            if self.econ_count <= 2*self.rush_count:
-                self.spawn_econ()
-                return
-            if not self.spawn_rush():
-                self.spawn_econ()
+        upper = 3 + turn // 50
+        if self.econ_count + self.rush_count >= upper: return 
+
+        print("ore count:", self.ore_count, "rate:", self.rate)
+        if self.ore_count > self.rate:
+            print("ore count increased, spawning econ")
+            self.spawn_smth()
             return
+            
+    def spawn_smth(self):
+        if (self.rush_count - INIT_RUSH) % RUSH_GROUP_SIZE != 0:
+            self.spawn_rush()
+        if self.econ_count <= 2*self.rush_count:
+            self.spawn_econ()
+            return
+        if not self.spawn_rush():
+            self.spawn_econ()
+        return 
+    
 
     def spawn_econ(self):
         if self.ore_dir is not None:
-            spawn_pos = self.rc.get_position().add(self.ore_dir)
+            if random.random() < 0.1:
+                spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
+            else:
+                spawn_pos = self.rc.get_position().add(self.ore_dir)
             if not self.rc.can_spawn(spawn_pos):
                 spawn_pos = self.rc.get_position().add(random.choice(DIRECTIONS))
         else:
@@ -96,6 +143,15 @@ class Core(Bot):
         if self.rc.can_spawn(spawn_pos):
             self.rc.spawn_builder(spawn_pos)
             self.econ_count += 1
+            return
+        for d in DIRECTIONS:
+            if d == self.rush_dir:continue
+            spawn_pos = self.rc.get_position().add(d)
+            if self.rc.can_spawn(spawn_pos):
+                self.rc.spawn_builder(spawn_pos)
+                self.econ_count += 1
+                return
+        print("cant spawn econ at", spawn_pos)
 
     def spawn_rush(self):
         spawn_pos = self.rc.get_position().add(self.rush_dir)
