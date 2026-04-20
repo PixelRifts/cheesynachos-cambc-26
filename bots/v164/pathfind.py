@@ -336,7 +336,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         
         # Possibly fix conveyor this bot is standing on
         conveyor_dir = d
-        entt = sense.get_entity(cur)
+        entt = rc.get_entity_type(rc.get_tile_building_id(cur))
         is_allied = sense.is_allied(cur)
         needs_fix = (entt is None or \
             not (
