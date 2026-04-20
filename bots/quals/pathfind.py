@@ -301,7 +301,7 @@ def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignor
 # Cardinal Pathfind
 
 def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_home: bool) -> bool:
-    global pf_state, cached_pf_state
+    global pf_state
     cur = rc.get_position()
     if cur == target:
         pf_state.past_pos = None
