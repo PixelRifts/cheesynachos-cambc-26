@@ -134,6 +134,9 @@ class BuilderBot(Bot):
         self.econ_connect_current_run: list[Position] = []
         self.econ_connect_past_pos = self.rc.get_position()
         self.econ_connect_blocked_by_own_turret = False
+        
+        # ECON_FOUNDRY shit ok no time
+        self.econ_primary_foundry_pos: Position = None
 
         # DEFENCE_LINE
         self.defence_is_to_core: bool = False
@@ -975,6 +978,7 @@ class BuilderBot(Bot):
                         self.switch_to_possibly_patrol()
                     return
                 
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
                 if self.rc.is_in_vision(self.econ_connect_current_target):
                     entt = self.sense.get_entity(self.econ_connect_current_target)
                     allied = self.sense.is_allied(self.econ_connect_current_target)
@@ -982,6 +986,9 @@ class BuilderBot(Bot):
                         self.switch_to_possibly_patrol()
                         return
 
+            # else:
+            # print('5')
+            if self.econ_connect_current_is_bridge:
                 pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
             else:
                 if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
@@ -1085,7 +1092,42 @@ class BuilderBot(Bot):
         self.switch_back_to_neutral(self.attack_return_to)
 
     def econ_remove_further_foundries(self):
+        if self.defence_current_target is None:
+            choices = get_valid_outputs(self.econ_primary_foundry_pos)
+            self.defence_current_target = None if len(choices) == 0 else random.choice(choices)
+            
+            if self.defence_current_target is None:
+                self.switch_to_econ()
+                return
+
+        self.foundrydestructor_follow(self.sense.feed_graph, BotState.DEFENCE_TO_HARVESTER)
         pass
+
+    def foundrydestructor_follow(self, graph, back_is: BotState):
+        # Forward Current Target
+        if is_adjacent_with_diag(self.rc.get_position(), self.defence_current_target):
+            curr = self.defence_current_target
+            go_back = False
+            changed = False
+            for i in range(1):
+                t = graph.get(curr, [])
+                t = [j for j in t if self.rc.is_in_vision(j) and self.sense.get_entity(j) in ENTITY_TRANSPORT]
+                found = None if len(t) == 0 else random.choice(t)
+                if found == None or found in self.sense.ally_builders or \
+                    found in self.core_tiles:
+                    go_back = True
+                    break
+                self.defence_use_fast = not is_adjacent(self.rc.get_position(), found)
+                curr = found
+                changed = True
+            
+            if go_back and not changed:
+                starting_from = curr
+                self.switch_to_econ()
+                return
+
+            self.defence_current_target = curr
+
 
     # Defence
 
@@ -1822,3 +1864,20 @@ class BuilderBot(Bot):
         # dist = 0.05 * self.rc.get_current_round() + 20 # (0, 20) -> (600, 50)
         self.pathfind_target = random_tile_biased(self.core_pos, inner_dist, dist, self.sense.map_width, self.sense.map_height, bias_dir)
         self.econ_explore()
+
+    def get_valid_outputs(self, f: Position) -> list[Position]:
+        op = []
+        for d in CARDINAL_DIRECTIONS:
+            p = f.add(d)
+            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+            if not rc.is_in_vision(p): continue
+            entt = self.sense.get_entity(p)
+            match entt:
+                case EntityType.BRIDGE: op.append(p)
+                case EntityType.CONVEYOR:
+                    if self.sense.get_direction(p) != d.opposite():
+                        op.append(p)
+                case EntityType.SPLITTER:
+                    if self.sense.get_direction(p) == d:
+                        op.append(p)
+        return op
