@@ -599,7 +599,7 @@ class BuilderBot(Bot):
         #     return False # vulnerable building that needs healing
 
         replace = self.replace_if_needed()
-        launcher_def = self.counter_launcher()
+        # launcher_def = self.counter_launcher()
         
         to_heal = None
         to_heal_dist = 100000
