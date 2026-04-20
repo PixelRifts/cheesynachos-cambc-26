@@ -447,92 +447,121 @@ class BuilderBot(Bot):
         self.attack_return_to = last_state
 
     def counter_launcher(self):
+        target = None
         for l in self.sense.enemy_launchers:
-            for d in CARDINAL_DIRECTIONS:
-                p = l.add(d)
-                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-                if not self.rc.is_in_vision(p): continue
-                if not self.sense.is_reachable(p): continue
+            for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
+                adj = l.add(d)
+                if not self.rc.is_in_vision(adj): continue
+                if adj in self.sense.ally_transports:
+                    t = adj.add(d)
+                    if not self.rc.is_in_vision(t): continue
+                    if t in self.sense.ally_launchers: break
+                    if is_pos_quickly_turretable(self.rc, t):
+                        target = t
+                        break
+
+        if target is None: return False
+        moved = False
+        self.rc.draw_indicator_dot(target, 0, 255, 0)
+        my_pos = self.rc.get_position()
+        
+        if self.rc.get_position().distance_squared(target) > GameConstants.ACTION_RADIUS_SQ:
+            pathfind.silly_pathfind_to(self.rc, self.sense, target) # shud avoid launchers
+            
+            moved = True
+            # no return - allow immediate heal
+        
+        if self.sense.is_allied(target):
+            if self.rc.can_destroy(target):
+                self.rc.destroy(target)
+                print("[LAUNCHER] Area Cleared", target)
+
+        if self.rc.can_build(EntityType.LAUNCHER, target):
+            self.rc.build(EntityType.LAUNCHER, target)
+            print("[LAUNCHER] Built", target)
+        return moved
+
+
                 
 
-    def replace_if_needed(self):
-        # If standing on conveyor/bridge -> we will tank hit so not considering for replacement
+    # def replace_if_needed(self):
+    #     # If standing on conveyor/bridge -> we will tank hit so not considering for replacement
 
-        for d in DIRECTIONS:
-            adj = self.rc.get_position().add(d)
-            if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
-            if not adj in self.sense.ally_transports: continue
+    #     for d in DIRECTIONS:
+    #         adj = self.rc.get_position().add(d)
+    #         if not is_in_map(adj, self.sense.map_width, self.sense.map_height): continue
+    #         if not adj in self.sense.ally_transports: continue
 
-            # We have an adjacent transport -> check for replacement condn
-            bldg = self.rc.get_tile_building_id(adj)
-            hp = self.rc.get_hp(bldg)
-
-            dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
-            if adj in self.sense.ally_transports: dmg += 2
-            # if adj in self.sense.enemy_builders: dmg = 2
-            # else: dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
-            
-            if hp > dmg: continue
-            entt = self.sense.get_entity(adj)
-            (ti, ax) = self.rc.get_global_resources()
-            extra = None
-            if entt in ENTITY_DIRECTIONAL:
-                extra = self.sense.get_direction(adj)
-            if entt == EntityType.BRIDGE:
-                extra = self.rc.get_bridge_target(bldg)
-            if self.rc.can_build(entt, adj, extra) and self.rc.can_destroy(adj):
-                self.rc.destroy(adj)
-                self.rc.build(entt, adj, extra)
-
-    # def replace_if_needed(self) -> bool:
-    #     for t in self.sense.ally_transports:
-    #         bldg = self.rc.get_tile_building_id(t)
+    #         # We have an adjacent transport -> check for replacement condn
+    #         bldg = self.rc.get_tile_building_id(adj)
     #         hp = self.rc.get_hp(bldg)
+
+    #         # dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
+    #         # if adj in self.sense.ally_transports: dmg += 2
+    #         if adj in self.sense.enemy_builders: dmg = 2
+    #         else: dmg = self.sense.turret_cost_map[self.sense.idx(adj)]
             
-    #         dmg = 0
-    #         if t in self.sense.enemy_builders: dmg = 2
-    #         else: dmg = self.sense.turret_cost_map[self.sense.idx(t)]
-
-    #         entt = self.sense.get_entity(t)
-    #         if entt != EntityType.CONVEYOR and entt != EntityType.BRIDGE:
-    #             continue
-    #         if hp > dmg:
-    #             continue
-
+    #         if hp > dmg: continue
+    #         entt = self.sense.get_entity(adj)
     #         (ti, ax) = self.rc.get_global_resources()
-    #         can_build = ti > (self.rc.get_conveyor_cost()[0] if entt == EntityType.CONVEYOR else self.rc.get_bridge_cost()[0])
-    #         conveyor_dir = self.sense.get_direction(t) if entt == EntityType.CONVEYOR else None
-    #         bridge_target = self.rc.get_bridge_target(bldg) if entt == EntityType.BRIDGE else None
+    #         extra = None
+    #         if entt in ENTITY_DIRECTIONAL:
+    #             extra = self.sense.get_direction(adj)
+    #         if entt == EntityType.BRIDGE:
+    #             extra = self.rc.get_bridge_target(bldg)
+    #         if self.rc.can_build(entt, adj, extra) and self.rc.can_destroy(adj):
+    #             self.rc.destroy(adj)
+    #             self.rc.build(entt, adj, extra)
 
-    #         move_dir = None
-    #         can_destroy = False
-    #         if self.rc.get_position() != t:
-    #             can_destroy = True
-    #         else:
-    #             for d in DIRECTIONS:
-    #                 if self.rc.can_move(d):
-    #                     can_destroy = True
-    #                     if entt == EntityType.CONVEYOR:
-    #                         move_dir = d
-    #                     break
+    def replace_if_needed(self) -> bool:
+        for t in self.sense.ally_transports:
+            bldg = self.rc.get_tile_building_id(t)
+            hp = self.rc.get_hp(bldg)
+            
+            dmg = 0
+            if t in self.sense.enemy_builders: dmg = 2
+            else: dmg = self.sense.turret_cost_map[self.sense.idx(t)]
 
-    #         if can_destroy and can_build:
-    #             if move_dir is not None and self.rc.can_move(move_dir):
-    #                 self.rc.move(move_dir)
-    #             if self.rc.can_destroy(t):
-    #                 self.rc.destroy(t)
+            entt = self.sense.get_entity(t)
+            if entt != EntityType.CONVEYOR and entt != EntityType.BRIDGE:
+                continue
+            if hp > dmg:
+                continue
 
-    #             if entt == EntityType.CONVEYOR:
-    #                 if self.rc.can_build_conveyor(t, conveyor_dir):
-    #                     self.rc.build_conveyor(t, conveyor_dir)
-    #                 print("[REPLACE] Replaced conveyor at", t)
-    #             else:
-    #                 if self.rc.can_build_bridge(t, bridge_target):
-    #                     self.rc.build_bridge(t, bridge_target)
-    #                 print("[REPLACE] Replaced bridge at", t)
-    #             return True
+            (ti, ax) = self.rc.get_global_resources()
+            can_build = ti > (self.rc.get_conveyor_cost()[0] if entt == EntityType.CONVEYOR else self.rc.get_bridge_cost()[0])
+            conveyor_dir = self.sense.get_direction(t) if entt == EntityType.CONVEYOR else None
+            bridge_target = self.rc.get_bridge_target(bldg) if entt == EntityType.BRIDGE else None
 
-    #     return False
+            move_dir = None
+            can_destroy = False
+            if self.rc.get_position() != t:
+                can_destroy = True
+            else:
+                for d in DIRECTIONS:
+                    if self.rc.can_move(d):
+                        can_destroy = True
+                        if entt == EntityType.CONVEYOR:
+                            move_dir = d
+                        break
+
+            if can_destroy and can_build:
+                if move_dir is not None and self.rc.can_move(move_dir):
+                    self.rc.move(move_dir)
+                if self.rc.can_destroy(t):
+                    self.rc.destroy(t)
+
+                if entt == EntityType.CONVEYOR:
+                    if self.rc.can_build_conveyor(t, conveyor_dir):
+                        self.rc.build_conveyor(t, conveyor_dir)
+                    print("[REPLACE] Replaced conveyor at", t)
+                else:
+                    if self.rc.can_build_bridge(t, bridge_target):
+                        self.rc.build_bridge(t, bridge_target)
+                    print("[REPLACE] Replaced bridge at", t)
+                return True
+
+        return False
 
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
@@ -550,6 +579,7 @@ class BuilderBot(Bot):
         #     return False # vulnerable building that needs healing
 
         replace = self.replace_if_needed()
+        launcher_def = self.counter_launcher()
         
         to_heal = None
         to_heal_dist = 100000

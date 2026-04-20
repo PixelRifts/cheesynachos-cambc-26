@@ -53,7 +53,7 @@ TURRET_ATTACK_COSTS = {
     EntityType.GUNNER:   10,
     EntityType.SENTINEL: 6,
     EntityType.BREACH:   40,
-    EntityType.LAUNCHER: 10
+    EntityType.LAUNCHER: 100
 }
 
 
