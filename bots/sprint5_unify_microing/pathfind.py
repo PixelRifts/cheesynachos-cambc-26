@@ -43,7 +43,7 @@ ENTITY_COSTS_CONVEYOR = {
     EntityType.SENTINEL: (100, 100000),
     EntityType.BREACH: (100, 100000),
     EntityType.LAUNCHER: (100, 100000),
-    EntityType.CONVEYOR: (2, 0),
+    EntityType.CONVEYOR: (0, 0),
     EntityType.SPLITTER: (2, 0),
     EntityType.ARMOURED_CONVEYOR: (2, 0),
     EntityType.BRIDGE: (2, 0),
@@ -71,6 +71,7 @@ class PFState:
         self.goal = None
         self.best_node = None
         self.best_h = 10000000000000
+        self.is_cardinal = False
 
         self.open_set.clear()
         self.closed_set.clear()
@@ -109,7 +110,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
     # start / restart A*
     if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
-        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
+        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position() or pf_state.is_cardinal):
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
@@ -307,9 +308,10 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         return True
 
     # start / restart A*
-    if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target):
+    if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target or not pf_state.is_cardinal):
         print('got reset')
         pf_state.reset()
+        pf_state.is_cardinal = True
         pf_state.astar_active = True
         pf_state.goal = target
 
@@ -608,7 +610,7 @@ def recompute_silly_virtual_target(rc: Controller, sense: Sense):
                     pf_state.should_bug = False
                     # print('exit bugmode')
 
-            print("Bug mode: ", current)
+            # print("Bug mode: ", current)
         else:
             # Greedy
             direct_action = current.direction_to(pf_state.final_target)
@@ -626,7 +628,7 @@ def recompute_silly_virtual_target(rc: Controller, sense: Sense):
                 pf_state.bug_dir = current.direction_to(pf_state.final_target)
                 pf_state.should_guess_rotation = False
             
-            print("Greedy: ", current)
+            # print("Greedy: ", current)
         
         # rc.draw_indicator_dot(current, 50, 180, 50)
     

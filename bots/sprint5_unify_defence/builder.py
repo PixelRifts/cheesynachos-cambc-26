@@ -332,7 +332,8 @@ class BuilderBot(Bot):
                     self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
             else: self.attack_disrupt_cache[bldg] = rsc
 
-    def micro_try_attack(self) -> bool:
+
+    def micro_try_attack(self, min_threshold=-10000000) -> bool:
         is_aggressive = self.state in ATTACK_STATES|DEFENCE_STATES
         budget = self.rc.get_cpu_time_elapsed() + 500
         
@@ -372,7 +373,7 @@ class BuilderBot(Bot):
 
                 score, skip = micro.score_attack_poi(self.rc, self.sense, p, self.core_pos)
                 if skip: continue
-                if score > best_score:
+                if score > best_score and score > min_threshold:
                     best_score = score
                     best_poi = p
                     best_already_has_sentinel = already_has_sentinel
@@ -394,12 +395,13 @@ class BuilderBot(Bot):
                 
                 score, skip = micro.score_attack_poi(self.rc, self.sense, c, self.core_pos)
                 if skip: continue
-                if score > best_score:
+                if score > best_score and score > min_threshold:
                     best_score = score
                     best_poi = c
                     best_already_has_sentinel = False
                 if self.rc.get_cpu_time_elapsed() > budget: break
 
+        if best_score < min_threshold: return
         if best_poi is not None:
             last_state = self.state
             target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, best_poi, self.enemy_core_pos)
@@ -409,8 +411,8 @@ class BuilderBot(Bot):
             self.attack_target = target
             self.attack_plan = plan
             self.attack_from = frm
+            self.attack_mode = True
             self.attack_return_to = last_state
-            self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
             return True
         return False
 
@@ -597,6 +599,7 @@ class BuilderBot(Bot):
         to_heal = None
         to_heal_dist = 100000
         for t in self.sense.heal_targets:
+            if not self.rc.is_in_vision(t): continue
             d = self.rc.get_position().distance_squared(t)
             if d < to_heal_dist:
                 to_heal_dist = d
@@ -1038,9 +1041,24 @@ class BuilderBot(Bot):
             # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
         
-        entt = self.sense.get_entity(self.attack_target)
-        allied = self.sense.is_allied(self.attack_target)
-
+        
+        if self.attack_mode:
+            score_threshold, skip = micro.score_attack_poi(self.rc, self.sense, self.attack_target, self.core_pos)
+            if skip: score_threshold = 0
+        else:
+            score_threshold, skip = micro.score_defence_poi(self.rc, self.sense, self.attack_target)
+            if skip: score_threshold = 0
+        
+        last_state = self.attack_return_to
+        if self.micro_try_attack(min_threshold=score_threshold+5):
+            skip = False
+            self.attack_return_to = last_state
+            print('redoing')
+            
+        if skip:
+            self.switch_back_to_neutral(self.attack_return_to)    
+            return
+        
         # print('uneditable check', self.attack_target)
         if not is_pos_editable(self.rc, self.attack_target):
             print(self.attack_target, 'is uneditable')

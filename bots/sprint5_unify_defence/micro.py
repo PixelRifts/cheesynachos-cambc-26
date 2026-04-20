@@ -26,25 +26,34 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
 
     is_empty = rc.is_tile_empty(poi) or sense.is_allied(poi) or sense.get_entity(poi) == EntityType.MARKER
     if is_empty: score += 100
+    if poi in sense.enemy_builders: return 0, True
 
     # Axionite not secured penalty
     roundnum = rc.get_current_round()
     aggression = min(1.0, roundnum / 1000)
     if sense.ax_trend() == 0.0:
         aggression = aggression / 1.5
+    if sense.ti_trend() < 5.0:
+        aggression = aggression / 1.2
 
     # Core Distance Penalty
     if not is_empty:
         dist = chebyshev_distance(poi, core_pos)
-        dist_penalty = dist * 1 * (1 - aggression)
+        dist_penalty = dist * 2.5 * (1 - aggression)
         if dist_penalty > 50: return 0, True
         score -= dist_penalty
+    
+    # Distance to nearby enemies penalty
+    for bb in sense.enemy_builders:
+        dist = chebyshev_distance(bb, poi)
+        dist_bonus = min(dist, 8) * (1 - aggression)
+        score += dist_bonus
 
     # Hp loss penalty
     if not is_empty:
         expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
-        if expected_hp_loss > rc.get_hp(): return 0, True
-        score -= expected_hp_loss * 5
+        if expected_hp_loss * 0.5 > rc.get_hp(): return 0, True
+        score -= expected_hp_loss * 2
 
     # Less HP
     if not is_empty:
@@ -56,15 +65,19 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
         p1 = poi.add(d)
         if not is_in_map(p1, sense.map_width, sense.map_height): continue
         if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) == EntityType.HARVESTER: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1): score += 10
+        p1entt = sense.get_entity(p1)
+        p1enemy = not sense.is_allied(p1)
+        if p1entt == EntityType.LAUNCHER and p1enemy: return 0, True
+        if p1entt == EntityType.HARVESTER: continue
+        if p1entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and p1enemy: score += 15
         if p1 in sense.enemy_builders: score += 20
         
         p2 = p1.add(d)
         if not is_in_map(p2, sense.map_width, sense.map_height): continue
         if sense.get_env(p2) == Environment.WALL: continue
-        if sense.get_entity(p2) == EntityType.HARVESTER: continue
-        if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
+        p2entt = sense.get_entity(p2)
+        if p2entt == EntityType.HARVESTER: continue
+        if p2entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
         if p2 in sense.enemy_builders: score += 20
         
         if d not in CARDINAL_DIRECTIONS: continue
@@ -72,11 +85,79 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
         p3 = p2.add(d)
         if not is_in_map(p3, sense.map_width, sense.map_height): continue
         if sense.get_env(p3) == Environment.WALL: continue
-        if sense.get_entity(p3) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3): score += 10
+        p3entt = sense.get_entity(p3)
+        if p3entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3): score += 6
         if p3 in sense.enemy_builders: score += 10
     
     return score, False
 
+def score_defence_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int, bool):
+    my_pos = rc.get_position()
+    score = 0
+    
+    # TODO: Change to A* path length
+    distance_index = min(chebyshev_distance(my_pos, poi), len(DISTANCE_SCORE_LUT) - 1)
+    score += DISTANCE_SCORE_LUT[distance_index]
+
+    is_empty = rc.is_tile_empty(poi) or sense.is_allied(poi) or sense.get_entity(poi) == EntityType.MARKER
+    if is_empty: score += 100
+    if poi in sense.enemy_builders: return 0, True
+
+    # Axionite not secured penalty
+    roundnum = rc.get_current_round()
+    aggression = min(1.0, roundnum / 1000)
+    if sense.ax_trend() == 0.0:
+        aggression = aggression / 1.5
+    if sense.ti_trend() < 5.0:
+        aggression = aggression / 1.2
+
+    # Distance to nearby enemies penalty
+    for bb in sense.enemy_builders:
+        dist = chebyshev_distance(bb, poi)
+        dist_bonus = min(dist, 8) * (1 - aggression)
+        score += dist_bonus
+
+    # Hp loss penalty
+    if not is_empty:
+        expected_hp_loss = sense.turret_cost_map[sense.idx(poi)] 
+        if expected_hp_loss * 0.5 > rc.get_hp(): return 0, True
+        score -= expected_hp_loss * 2
+
+    # Less HP
+    if not is_empty:
+        bbd = GameConstants.BUILDER_BOT_ATTACK_DAMAGE
+        ticks_required = (rc.get_hp(rc.get_tile_building_id(poi)) + bbd - 1) // bbd
+        score -= ticks_required * 5
+    
+    for d in DIRECTIONS:
+        p1 = poi.add(d)
+        if not is_in_map(p1, sense.map_width, sense.map_height): continue
+        if sense.get_env(p1) == Environment.WALL: continue
+        p1entt = sense.get_entity(p1)
+        p1enemy = not sense.is_allied(p1)
+        if p1entt == EntityType.LAUNCHER and p1enemy: return 0, True
+        if p1entt == EntityType.HARVESTER: continue
+        if p1entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and p1enemy: score += 15
+        if p1 in sense.enemy_builders: score += 20
+        
+        p2 = p1.add(d)
+        if not is_in_map(p2, sense.map_width, sense.map_height): continue
+        if sense.get_env(p2) == Environment.WALL: continue
+        p2entt = sense.get_entity(p2)
+        if p2entt == EntityType.HARVESTER: continue
+        if p2entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
+        if p2 in sense.enemy_builders: score += 20
+        
+        if d not in CARDINAL_DIRECTIONS: continue
+        
+        p3 = p2.add(d)
+        if not is_in_map(p3, sense.map_width, sense.map_height): continue
+        if sense.get_env(p3) == Environment.WALL: continue
+        p3entt = sense.get_entity(p3)
+        if p3entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3): score += 6
+        if p3 in sense.enemy_builders: score += 10
+    
+    return score, False
 
 def poi_attack_plan(rc: Controller, sense: sense.Sense, poi: Position, enemy_core_pos: Position) -> tuple[Position, Position, EntityType, Direction]:
     my_pos = rc.get_position()

@@ -19,29 +19,29 @@ class Launcher(Bot):
         #         self.type = Defence.CORELAUNCHER
         #         break
 
-        # my_pos = rc.get_position()
-        # self.inactivity_counter = 0
-        # self.fading = False
-        # protecting_harvester = False
-        # for d in DIRECTIONS:
-        #     p = my_pos.add(d)
-        #     if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
-        #     bldg = rc.get_tile_building_id(p)
-        #     entt = None if bldg is None else rc.get_entity_type(bldg)
-        #     allied = False if bldg is None else rc.get_team(bldg) == rc.get_team()
-        #     if entt in ENTITY_TRANSPORT and allied:
-        #         self.fading = True
+        self.inactive_counter = 0
             
 
     def start_turn(self):
-        # TODO: senses update
-        # self.inactivity_counter += 1
-        # ti, ax = self.rc.get_global_resources()
-        # if self.fading and self.inactivity_counter > LAUNCHER_INACTIVITY_DELETION and ti < TI_DANGEROUSLY_LOW_THRESHOLD:
-        #     self.rc.self_destruct()
+        my_pos = self.rc.get_position()
+        self.inactivity_counter = 0
+        self.fading = False
+        protecting_harvester = False
+        for d in DIRECTIONS:
+            p = my_pos.add(d)
+            if not is_in_map(p, self.rc.get_map_width(), self.rc.get_map_height()): continue
+            bldg = self.rc.get_tile_building_id(p)
+            entt = None if bldg is None else self.rc.get_entity_type(bldg)
+            allied = False if bldg is None else self.rc.get_team(bldg) == self.rc.get_team()
+            if entt in ENTITY_TRANSPORT and not allied:
+                self.fading = False
         pass
 
     def turn(self):
+        if self.fading:
+            self.inactive_counter += 1
+            if self.inactive_counter > 10:
+                self.rc.self_destruct()
         self.far()
 
     def far(self):
@@ -54,7 +54,6 @@ class Launcher(Bot):
             if self.rc.get_team(bldg) == self.rc.get_team():
                 entt = self.rc.get_entity_type(bldg)
                 if entt == EntityType.LAUNCHER and bldg > self.rc.get_id():
-                    
                     valid = True
                     valid_posns = []
                     turret_pos = self.rc.get_position(bldg)
@@ -122,9 +121,10 @@ class Launcher(Bot):
             for pos in sorted_tiles:
                 if self.rc.can_launch(enemy_pos, pos):
                     self.rc.launch(self.rc.get_position(bot), pos)
-                    
+                    self.inactive_counter = 0
                     return
                 else:
+                    self.inactive_counter = 0
                     print("couldnt launch", enemy_pos, " to ", pos)
     
 

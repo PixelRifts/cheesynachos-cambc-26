@@ -31,6 +31,7 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position, ti_min:
     already_connected = False
 
     if entt in ENTITY_UNWALKABLE:
+        print('p=',p,'is unwalkable')
         if allied:
             # print('unwalkable allied', p)
             if rc.get_position() == p:
@@ -45,6 +46,7 @@ def try_destroy(rc: Controller, sense: Sense, me: Position, p: Position, ti_min:
         else:
             print('cant destroy', p)
     else:
+        print('p=',p,'is walkable')
         if allied:
             # print('walkable allied', p)
             if not is_adjacent_with_diag(rc.get_position(), p):

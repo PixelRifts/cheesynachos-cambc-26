@@ -307,6 +307,10 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         pf_state.past_pos = None
         return True
 
+    if pf_state.past_pos != cur and pf_state.past_pos is not None:
+        silly_pathfind_to(rc, sense, pf_state.past_pos)
+        return
+
     # start / restart A*
     if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target or not pf_state.is_cardinal):
         print('got reset')
@@ -323,7 +327,6 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
     if pf_state.astar_active:
         step_cardinal_astar_internal(rc, sense, max_expansions=200)
         pf_state.computed_this_turn = True
-    
     
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []

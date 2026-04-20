@@ -8,7 +8,7 @@ from collections import deque
 AXIONITE_STOCKPILE_THRESHOLD_ROUND = 1200
 AXIONITE_MIN_STOCKPILE = 41
 TITANIUM_MAINTAIN_AMOUNT = 1000
-RUSH_GROUP_SIZE = 1
+INITIAL_RUSH_GROUP_SIZE = 1
 INIT_RUSH = 1
 
 class Core(Bot):
@@ -23,6 +23,8 @@ class Core(Bot):
         self.ore_dir = None
         map_center = Position(self.rc.get_map_width() // 2, self.rc.get_map_height() // 2)
         self.rush_dir = self.rc.get_position().direction_to(map_center)
+        self.rush_group_size = INITIAL_RUSH_GROUP_SIZE
+        self.staticed_rushers = INIT_RUSH
 
     def mark_rescue_operation(self, bldg_id: int):
         if bldg_id in self.active_rescue_ops:
@@ -76,7 +78,7 @@ class Core(Bot):
         target = 3 + turn // 50
         print(target, self.econ_count, self.rush_count)
         if self.econ_count + self.rush_count < target:
-            if (self.rush_count - INIT_RUSH) % RUSH_GROUP_SIZE != 0:
+            if (self.rush_count - self.staticed_rushers) % self.rush_group_size != 0:
                 self.spawn_rush()
             if self.econ_count <= 2*self.rush_count:
                 self.spawn_econ()
