@@ -344,7 +344,6 @@ class BuilderBot(Bot):
         best_already_has_sentinel = False
         for h in harvesters:
             if self.sense.get_env(h) != Environment.ORE_TITANIUM: continue
-
             already_has_sentinel = False
             count_turrets = 0
             for d in CARDINAL_DIRECTIONS:
@@ -697,7 +696,6 @@ class BuilderBot(Bot):
                 print('breaking')
                 break
 
-
         # Pick nearest Titanium Ore to target
         closest_ore = None
         closest_ore_dir = Direction.CENTRE
@@ -799,7 +797,6 @@ class BuilderBot(Bot):
             self.econ_target_is_ax = is_ax
 
     def econ_target(self):
-
         # print('post harvester validation')
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
             # print('[ECON_HARVESTER]', self.econ_target_ore)
@@ -919,7 +916,6 @@ class BuilderBot(Bot):
                 print('couldnt build at ', self.econ_target_ore)
                 # (ti, ax) = self.rc.get_global_resources()
                 return
-        
 
     def econ_connect(self):
         # Compute next target part
@@ -927,7 +923,7 @@ class BuilderBot(Bot):
         if self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
             self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None:
             self.recompute_econ_connect_target()
-            
+        
         if not (self.econ_connect_current_target is None or self.econ_connect_current_target == self.rc.get_position() or \
             self.econ_connect_protect_target == self.econ_connect_current_target or self.econ_connect_past_pos is None):
             self.rc.draw_indicator_dot(self.econ_connect_current_target, 255, 0, 0)
@@ -959,21 +955,22 @@ class BuilderBot(Bot):
 
             # else:
             # print('5')
-            if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
-                pathfind.silly_pathfind_to(self.rc, self.sense, self.econ_connect_past_pos)
-                print('if')
+            if self.econ_connect_current_is_bridge:
+                pathfind.fast_pathfind_to(self.rc, self.sense, self.econ_connect_current_target)
             else:
-                if self.econ_connect_current_target is not None and self.econ_connect_current_target != self.rc.get_position():
-                    print("econ connect target", self.econ_connect_current_target)
-                    if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
-                        self.econ_connect_past_pos = self.rc.get_position()
-                        print('else - if')
-                    else:
-                        self.econ_connect_past_pos = None
-                        self.recompute_econ_connect_target()
-                        print('else - else')
-
- 
+                if self.econ_connect_past_pos is not None and self.econ_connect_past_pos != self.rc.get_position():
+                    pathfind.silly_pathfind_to(self.rc, self.sense, self.econ_connect_past_pos)
+                    print('if')
+                else:
+                    if self.econ_connect_current_target is not None and self.econ_connect_current_target != self.rc.get_position():
+                        print("econ connect target", self.econ_connect_current_target)
+                        if not pathfind.cardinal_pathfind_to(self.rc, self.sense, self.econ_connect_current_target, True):
+                            self.econ_connect_past_pos = self.rc.get_position()
+                            print('else - if')
+                        else:
+                            self.econ_connect_past_pos = None
+                            self.recompute_econ_connect_target()
+                            print('else - else')
 
     def recompute_econ_connect_target(self):
         print('recompute')
@@ -1543,9 +1540,9 @@ class BuilderBot(Bot):
         start_flat = start_y * map_w + start_x
         end_flat   = end_y   * map_w + end_x
 
-        _get_env          = self.sense.get_env
-        _get_entity       = self.sense.get_entity
-        _is_allied        = self.sense.is_allied
+        _get_env          = self.sense.get_env_idxd
+        _get_entity       = self.sense.get_entity_idxd
+        _is_allied        = self.sense.is_allied_idxd
         _is_in_vision     = self.rc.is_in_vision
         _get_tile_builder = self.rc.get_tile_builder_bot_id
         _WALL             = Environment.WALL
@@ -1591,7 +1588,6 @@ class BuilderBot(Bot):
                 entt = _get_entity(nxt)
                 if entt in _UNWALKABLE: continue
                 allied = _is_allied(nxt)
-                if allied and entt in _TRANSPORT and nxt != end_flat: continue
                 if _is_in_vision(POSITION_CACHE[nxt]) and _get_tile_builder(POSITION_CACHE[nxt]) is not None: continue
 
                 if nxt in visited and visited[nxt] <= ng:
@@ -1609,46 +1605,77 @@ class BuilderBot(Bot):
     def should_bridge_heuristic(self, start: Position, end: Position, cutoff: int) -> bool:
         if start == end or is_adjacent(start, end): return False
 
-        def check(x, y):
-            p = Position(x, y)
-            if not is_in_map(p, self.sense.map_width, self.sense.map_height): return True
-            if self.sense.get_env(p) == Environment.WALL: return True
-            entt = self.sense.get_entity(p)
-            allied = self.sense.is_allied(p)
-            if entt in ENTITY_UNWALKABLE: return True
-            if allied and entt in ENTITY_TRANSPORT and p != end: return True
-            if p in self.sense.enemy_builders: return True
-            return False
+        map_w = self.sense.map_width
+        map_h = self.sense.map_height
 
-        # try x -> y
-        cx, cy = start.x, start.y
-        blocked_xy = False
-        while cx != end.x:
-            cx += 1 if end.x > cx else -1
-            if check(cx, cy):
-                blocked_xy = True
-                break
-        if not blocked_xy:
-            while cy != end.y:
-                cy += 1 if end.y > cy else -1
-                if check(cx, cy):
-                    blocked_xy = True
-                    break
-        # try y -> x
-        cx, cy = start.x, start.y
-        blocked_yx = False
-        while cy != end.y:
-            cy += 1 if end.y > cy else -1
-            if check(cx, cy):
-                blocked_yx = True
-                break
-        if not blocked_yx:
-            while cx != end.x:
-                cx += 1 if end.x > cx else -1
-                if check(cx, cy):
-                    blocked_yx = True
-                    break
-        return blocked_xy and blocked_yx
+        start_x, start_y = start.x, start.y
+        end_x,   end_y   = end.x,   end.y
+
+        adx = abs(start_x - end_x)
+        ady = abs(start_y - end_y)
+        if (adx if adx > ady else ady) > cutoff:
+            return True
+
+        start_flat = start_y * map_w + start_x
+        end_flat   = end_y   * map_w + end_x
+
+        _get_env          = self.sense.get_env_idxd
+        _get_entity       = self.sense.get_entity_idxd
+        _is_allied        = self.sense.is_allied_idxd
+        _is_in_vision     = self.rc.is_in_vision
+        _get_tile_builder = self.rc.get_tile_builder_bot_id
+        _WALL             = Environment.WALL
+        _UNWALKABLE       = ENTITY_UNWALKABLE
+        _TRANSPORT        = ENTITY_TRANSPORT
+
+        DIR_TABLE = (
+            ( 0, -1, -map_w     ),
+            ( 0,  1,  map_w     ),
+            ( 1,  0,  1         ),
+            (-1,  0, -1         ),
+        )
+
+        heap    = [(adx if adx > ady else ady, 0, start_flat)]
+        visited = {start_flat: 0}
+
+        while heap:
+            f, g, pos = heapq.heappop(heap)
+            if g > cutoff:
+                continue
+            if pos == end_flat:
+                return False
+
+            px = pos % map_w
+            py = pos // map_w
+
+            for dx, dy, d_delta in DIR_TABLE:
+                ng = g + 1
+                if ng > cutoff: continue
+
+                nxt_x = px + dx
+                nxt_y = py + dy
+                if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h: continue
+
+                nxt = pos + d_delta
+
+                env  = _get_env(nxt)
+                if env == _WALL: continue
+                entt = _get_entity(nxt)
+                if entt in _UNWALKABLE: continue
+                allied = _is_allied(nxt)
+                if allied and entt in _TRANSPORT and nxt != end_flat: continue
+                if _is_in_vision(POSITION_CACHE[nxt]) and _get_tile_builder(POSITION_CACHE[nxt]) is not None: continue
+
+                if nxt in visited and visited[nxt] <= ng:
+                    continue
+
+                visited[nxt] = ng
+
+                hdx = abs(nxt_x - end_x)
+                hdy = abs(nxt_y - end_y)
+                h   = hdx if hdx > hdy else hdy
+                heapq.heappush(heap, (ng + h, ng, nxt))
+        return True
 
     def is_launcher_protected(self, pos: Position) -> bool:
         not_enough_info = False
