@@ -497,7 +497,6 @@ class BuilderBot(Bot):
         return moved
 
 
-                
 
     # def replace_if_needed(self):
     #     # If standing on conveyor/bridge -> we will tank hit so not considering for replacement
@@ -721,12 +720,43 @@ class BuilderBot(Bot):
                 print('breaking')
                 break
         
-        if closest_ore is not None and not self.should_attack_harvester(closest_ore):
-            self.switch_state(BotState.ECON_TARGET)
-            self.econ_target_ore = closest_ore
-            self.pathfind_target = closest_ore.add(closest_ore_dir)
-            self.econ_target_is_ax = closest_ore_is_ax
-            return
+        if closest_ore is not None:
+            if self.should_attack_harvester(closest_ore):
+                best_poi = None
+                best_score = -10000000
+
+                for d in CARDINAL_DIRECTIONS:
+                    p = closest_ore.add(d)
+                    if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+                    if p in self.attack_blacklist_set: continue
+                    if p in self.sense.transport_attack_blacklist: continue
+                    if p in self.sense.ally_builders: continue
+                    if p in self.sense.enemy_builders: continue
+                    if not self.rc.is_in_vision(p): continue
+                    if not self.sense.is_reachable(p): continue
+                    if not is_pos_turretable(self.rc, p) and not is_protecting_conveyor(self.rc, self.sense, p): continue
+
+                    score, skip = micro.score_attack_poi(self.rc, self.sense, p, self.core_pos)
+                    if skip: continue
+                    if score > best_score:
+                        best_score = score
+                        best_poi = p
+
+                if best_poi is not None:
+                    last_state = self.state
+                    target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, best_poi, self.enemy_core_pos)
+                    self.switch_state(BotState.ATTACK_EXEC_PLAN)
+                    self.attack_target = target
+                    self.attack_plan = plan
+                    self.attack_from = frm
+                    self.attack_return_to = last_state
+                    return
+            else:
+                self.switch_state(BotState.ECON_TARGET)
+                self.econ_target_ore = closest_ore
+                self.pathfind_target = closest_ore.add(closest_ore_dir)
+                self.econ_target_is_ax = closest_ore_is_ax
+                return
 
         if self.state not in MICRO_EXCLUDE_STATES:
             if len(self.sense.enemy_turrets) != 0:
