@@ -101,7 +101,9 @@ class BuilderBot(Bot):
             case self.rush_spawn_pos: self.job = BotJob.RUSH
             case _: self.job = BotJob.ECON
         match self.job:
-            case BotJob.HEAL: self.switch_state(BotState.CORE_HEALER)
+            case BotJob.HEAL:
+                self.switch_state(BotState.CORE_HEALER)
+                self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
             case BotJob.ECON: self.switch_to_econ()
             case BotJob.RUSH: self.switch_state(BotState.ATTACK_GOTO)
                 
@@ -596,7 +598,7 @@ class BuilderBot(Bot):
         #     return False # vulnerable building that needs healing
 
         replace = self.replace_if_needed()
-        launcher_def = self.counter_launcher()
+        # launcher_def = self.counter_launcher()
         
         to_heal = None
         to_heal_dist = 100000
@@ -1193,16 +1195,25 @@ class BuilderBot(Bot):
             (Direction.WEST, Direction.NORTHWEST),
             (Direction.WEST, Direction.SOUTHWEST),
         ]
-        for a,b in ds:
-            pf = self.core_pos.add(a)
-            p = pf.add(b)
-            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-            if self.sense.get_env(p) == Environment.WALL: continue
+        
+        if len(self.sense.heal_targets) == 0:
+            for a,b in ds:
+                pf = self.core_pos.add(a)
+                p = pf.add(b)
+                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+                if self.sense.get_env(p) == Environment.WALL: continue
 
-            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
-                if not try_destroy(self.rc, self.sense, pf, p): return
-                if self.rc.can_build_road(p): self.rc.build_road(p)
-        pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
+                if self.sense.get_entity(p) == EntityType.MARKER or \
+                    (self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p)):
+                    if not try_destroy(self.rc, self.sense, pf, p): return
+                    if self.rc.can_build_road(p): self.rc.build_road(p)
+
+            if self.pathfind_target == None:
+                self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
+            self.rc.draw_indicator_dot(self.pathfind_target, 0, 255, 255)
+            res = pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+            if res or pathfind.pf_state.failed:
+                self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
 
     # Attack
 
@@ -1803,6 +1814,7 @@ class BuilderBot(Bot):
             self.switch_to_econ()
         elif to_state == BotState.CORE_HEALER:
             self.switch_state(BotState.CORE_HEALER)
+            self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
         elif to_state in DEFENCE_STATES:
             self.switch_state(BotState.DEFENCE_TO_HARVESTER)
         else:
