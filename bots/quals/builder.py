@@ -476,7 +476,6 @@ class BuilderBot(Bot):
         if target is None: return False
         moved = False
         self.rc.draw_indicator_dot(target, 0, 255, 0)
-        my_pos = self.rc.get_position()
         
         if self.rc.get_position().distance_squared(target) > GameConstants.ACTION_RADIUS_SQ:
             pathfind.silly_pathfind_to(self.rc, self.sense, target) # shud avoid launchers
