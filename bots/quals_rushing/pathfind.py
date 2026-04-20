@@ -1,4 +1,5 @@
 import sys
+from procedure import bb_should_fire, is_protecting_conveyor
 
 from sense import Sense
 from helpers import *
@@ -8,9 +9,52 @@ from cambc import Controller, Direction, EntityType, Environment, Position, Game
 # Implement BUG + BFS Pathfinding
 from heapq import heappush, heappop
 
-BARRIER_COST = 20
-DEBUG_DRAW = True
-H_WEIGHT = 1.5
+ENV_COSTS = {
+    None: 0,
+    Environment.EMPTY: 2,
+    Environment.ORE_AXIONITE: 3,
+    Environment.ORE_TITANIUM: 3,
+    Environment.WALL: 100000,
+}
+
+# (Allied, Not Allied)
+ENTITY_COSTS_FAST = {
+    None: (0, 0),
+    EntityType.CORE: (0, 100000),
+    EntityType.GUNNER: (100, 100000),
+    EntityType.SENTINEL: (100, 100000),
+    EntityType.BREACH: (100, 100000),
+    EntityType.LAUNCHER: (100, 100000),
+    EntityType.CONVEYOR: (0, 0),
+    EntityType.SPLITTER: (0, 0),
+    EntityType.ARMOURED_CONVEYOR: (0, 0),
+    EntityType.BRIDGE: (0, 0),
+    EntityType.HARVESTER: (400, 100000),
+    EntityType.FOUNDRY: (400, 100000),
+    EntityType.ROAD: (0, 0),
+    EntityType.BARRIER: (20, 100000),
+    EntityType.MARKER: (0, 1),
+}
+
+ENTITY_COSTS_CONVEYOR = {
+    None: (2, 2),
+    EntityType.CORE: (0, 100000),
+    EntityType.GUNNER: (100, 100000),
+    EntityType.SENTINEL: (100, 100000),
+    EntityType.BREACH: (100, 100000),
+    EntityType.LAUNCHER: (100, 100000),
+    EntityType.CONVEYOR: (2, 0),
+    EntityType.SPLITTER: (2, 0),
+    EntityType.ARMOURED_CONVEYOR: (2, 0),
+    EntityType.BRIDGE: (2, 0),
+    EntityType.HARVESTER: (400, 100000),
+    EntityType.FOUNDRY: (400, 100000),
+    EntityType.ROAD: (2, 0),
+    EntityType.BARRIER: (20, 100000),
+    EntityType.MARKER: (0, 1),
+}
+
+DEBUG_DRAW = False
 
 class PFState:
     def __init__(self):
@@ -27,6 +71,7 @@ class PFState:
         self.goal = None
         self.best_node = None
         self.best_h = 10000000000000
+        self.is_cardinal = False
 
         self.open_set.clear()
         self.closed_set.clear()
@@ -37,6 +82,7 @@ class PFState:
         
         self.result_path.clear()
         self.computed_this_turn = False
+        self.preempted = False
 
         # Silly Bug
         self.virtual_target = Position(0, 0)
@@ -49,6 +95,7 @@ class PFState:
         self.validate = False
 
 pf_state = PFState()
+# cached_pf_state = PFState()
 def clear():
     pf_state.computed_this_turn = False
 
@@ -62,18 +109,19 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
     if pf_state.computed_this_turn: return False
 
     # start / restart A*
-    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target\
-        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position()):
+    if (not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target \
+        or (pf_state.past_pos is not None and pf_state.past_pos != rc.get_position() or pf_state.is_cardinal):
         pf_state.reset()
         pf_state.astar_active = True
         pf_state.goal = target
 
-        pf_state.g_score[cur] = 0
-        heappush(pf_state.open_set, (0, cur))
+        cur_idx = cur.y * sense.map_width + cur.x
+        pf_state.g_score[cur_idx] = 0
+        heappush(pf_state.open_set, (0, cur_idx))
 
     # continue A* for a limited budget
     if pf_state.astar_active:
-        step_astar_internal(rc, sense, max_expansions=50, ignore_builder_at_tgt=ignore_builder_at_tgt)
+        step_astar_internal(rc, sense, max_expansions=100, ignore_builder_at_tgt=ignore_builder_at_tgt)
         pf_state.computed_this_turn = True
 
     if not pf_state.astar_active and pf_state.failed:
@@ -82,7 +130,8 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
     if pf_state.result_path:
         # follow path it
-        next_pos = pf_state.result_path[0]
+        next_pos_idx = pf_state.result_path[0]
+        next_pos = Position(next_pos_idx % sense.map_width, next_pos_idx // sense.map_width)
         d = cur.direction_to(next_pos)
 
         moved = False
@@ -90,6 +139,7 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
             rc.destroy(next_pos)
         if rc.can_move(d):
             rc.move(d)
+            pf_state.past_pos = rc.get_position()
             moved = True
         elif rc.can_build_road(next_pos):
             rc.build_road(next_pos)
@@ -113,74 +163,131 @@ def fast_pathfind_to(rc: Controller, sense: Sense, target: Position, ignore_buil
 
 def step_astar_internal(rc: Controller, sense: Sense, max_expansions: int, ignore_builder_at_tgt=False):
     expansions = 0
-    open_set = pf_state.open_set
+    open_set   = pf_state.open_set
     closed_set = pf_state.closed_set
-    came_from = pf_state.came_from
-    g_score = pf_state.g_score
-    goal = pf_state.goal
+    came_from  = pf_state.came_from
+    g_score    = pf_state.g_score
 
     map_w = sense.map_width
     map_h = sense.map_height
+
+    my_pos = rc.get_position()
+    me_x   = my_pos.x
+    me_y   = my_pos.y
+    me_idx = me_x * map_w + me_y
+
+    goal_pos = pf_state.goal
+    goal_x   = goal_pos.x
+    goal_y   = goal_pos.y
+    goal     = goal_y * map_w + goal_x
+
+    _is_seen               = sense.is_seen_idxd
+    _get_env               = sense.get_env_idxd
+    _get_entity            = sense.get_entity_idxd
+    _is_allied             = sense.is_allied_idxd
+    _turret_cost_map       = sense.turret_cost_map
+    _is_in_vision          = rc.is_in_vision
+    _get_tile_builder      = rc.get_tile_builder_bot_id
+    _ENV_WALL              = Environment.WALL
+    _ENV_COSTS             = ENV_COSTS
+    _ENTITY_COSTS          = ENTITY_COSTS_FAST
+    _heappop               = heappop
+    _heappush              = heappush
+    _ignore_builder_at_tgt = ignore_builder_at_tgt
+
+    best_h    = pf_state.best_h
+    best_node = pf_state.best_node
+
+    DIR_OFFSETS = (
+        ( 0, -1, -map_w     ),   # N
+        ( 0,  1,  map_w     ),   # S
+        ( 1,  0,  1         ),   # E
+        (-1,  0, -1         ),   # W
+        ( 1, -1,  1 - map_w ),   # NE
+        (-1, -1, -1 - map_w ),   # NW
+        ( 1,  1,  1 + map_w ),   # SE
+        (-1,  1, -1 + map_w ),   # SW
+    )
     
     while open_set and expansions < max_expansions:
-        _, current = heappop(open_set)
-        if current in pf_state.closed_set:
+        _, current = _heappop(open_set)
+        if current in closed_set:
             continue
-        pf_state.closed_set.add(current)
+        closed_set.add(current)
 
         if current == goal:
-            if DEBUG_DRAW: rc.draw_indicator_dot(current, 0, 255, 0)
+            if DEBUG_DRAW: rc.draw_indicator_dot(Position(current % map_w, current // map_w), 0, 255, 0)
             path = reconstruct_path(came_from, current)
             pf_state.result_path = path
             pf_state.result_path.pop(0)
             if pf_state.result_path:
-                if DEBUG_DRAW: rc.draw_indicator_line(rc.get_position(), pf_state.result_path[0], 0, 255, 0)
+                if DEBUG_DRAW: rc.draw_indicator_line(rc.get_position(), 
+                        Position(pf_state.result_path[0] % map_w, pf_state.result_path[0] // map_w), 0, 255, 0)
 
-            for i in range(len(pf_state.result_path) - 1):
-                if DEBUG_DRAW: rc.draw_indicator_line(
-                    pf_state.result_path[i],
-                    pf_state.result_path[i + 1],
-                    0, 255, 0
-                )
+            if DEBUG_DRAW: 
+                for i in range(len(pf_state.result_path) - 1):
+                    rc.draw_indicator_line(
+                        Position(pf_state.result_path[i] % map_w, pf_state.result_path[i] // map_w),
+                        Position(pf_state.result_path[i + 1] % map_w, pf_state.result_path[i + 1] // map_w),
+                        0, 255, 0
+                    )
+                
             pf_state.astar_active = False
+            pf_state.best_h       = best_h
+            pf_state.best_node    = best_node
             return
 
-        for d in DIRECTIONS:
-            nxt = current.add(d)
+        cx = current % map_w
+        cy = current // map_w
+        current_g = g_score[current]
+
+        for dx, dy, d_offset in DIR_OFFSETS:
+            # nxt = current.add(d)
+            nxt_x = cx + dx
+            nxt_y = cy + dy
+            if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h:
+                continue
+            nxt = current + d_offset
+            if nxt in closed_set: continue
+
             cost = 1
 
-            if not is_in_map(nxt, map_w, map_h): continue
-            if sense.is_seen(nxt):
-                env = sense.get_env(nxt)
-                entt = sense.get_entity(nxt)
-                allied = sense.is_allied(nxt)
+            if _is_seen(nxt):
+                env = _get_env(nxt)
                 if env == Environment.WALL: continue
                 
-                if not (ignore_builder_at_tgt and nxt is pf_state.goal):
-                    if rc.is_in_vision(nxt) and rc.get_tile_builder_bot_id(nxt) is not None: continue
-
-                if not is_entt_pathable(entt, allied):
-                    if allied and entt == EntityType.BARRIER:
-                        cost = BARRIER_COST
-                    else: continue
+                if not (_ignore_builder_at_tgt and nxt == goal):
+                    if _is_in_vision(POSITION_CACHE[nxt]) and _get_tile_builder(POSITION_CACHE[nxt]) is not None:
+                        continue
+                
+                entt   = _get_entity(nxt)
+                allied = _is_allied(nxt)
+                cost  += _ENV_COSTS[env]
+                cost  += _ENTITY_COSTS[entt][1 - int(allied)]
+                # cost  += _turret_cost_map[nxt] // 2
+                if cost >= 100000:
+                    continue
             
-            tentative = g_score[current] + cost
+            tentative = current_g + cost
             if nxt in g_score and tentative >= g_score[nxt]: continue
-            h = chebyshev_distance(nxt, goal)
+            
+            adx = abs(nxt_x - goal_x)
+            ady = abs(nxt_y - goal_y)
+            h   = adx if adx > ady else ady
             if h < pf_state.best_h:
                 pf_state.best_h = h
                 pf_state.best_node = nxt
 
             came_from[nxt] = current
             g_score[nxt] = tentative
-            heappush(
-                open_set,
-                (tentative + H_WEIGHT * chebyshev_distance(nxt, goal), nxt)
-            )
+            _heappush(open_set, (tentative + h, nxt))
             
-            if DEBUG_DRAW: rc.draw_indicator_dot(nxt, 255, 0, 0)
+            if DEBUG_DRAW: rc.draw_indicator_dot(Position(nxt % map_w, nxt // map_w), 255, 0, 0)
 
         expansions += 1
+
+    pf_state.best_h    = best_h
+    pf_state.best_node = best_node
 
     if not open_set:
         # no path exists
@@ -200,6 +307,10 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         pf_state.past_pos = None
         return True
 
+    if pf_state.past_pos != cur and pf_state.past_pos is not None:
+        silly_pathfind_to(rc, sense, pf_state.past_pos)
+        return
+
     # start / restart A*
     if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target or not pf_state.is_cardinal):
         print('got reset')
@@ -210,13 +321,13 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
 
         pf_state.g_score[cur] = 0
         heappush(pf_state.open_set, (0, cur))
-        if pf_state.computed_this_turn: return False
+    
 
     # continue A* for a limited budget
     if pf_state.astar_active:
+        if pf_state.computed_this_turn: return False
         step_cardinal_astar_internal(rc, sense, max_expansions=200)
         pf_state.computed_this_turn = True
-    
     
     if not pf_state.astar_active and pf_state.failed:
         pf_state.result_path = []
@@ -229,7 +340,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         
         # Possibly fix conveyor this bot is standing on
         conveyor_dir = d
-        entt = sense.get_entity(cur)
+        entt = rc.get_entity_type(rc.get_tile_building_id(cur))
         is_allied = sense.is_allied(cur)
         needs_fix = (entt is None or \
             not (
@@ -307,6 +418,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
     g_score = pf_state.g_score
     goal = pf_state.goal
 
+    _turret_cost_map   = sense.turret_cost_map
     map_w = sense.map_width
     map_h = sense.map_height
     
@@ -335,6 +447,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
 
         for d in CARDINAL_DIRECTIONS:
             nxt = current.add(d)
+            nxtidx = sense.idx(nxt)
             if nxt in pf_state.closed_set: continue
             cost = 1
 
@@ -355,7 +468,8 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
                 if allied and entt == EntityType.BARRIER:
                     cost = ENTITY_COSTS_CONVEYOR[entt][0]
                 else: continue
-                
+            cost += _turret_cost_map[nxtidx]
+
             tentative = g_score[current] + cost
             if nxt in pf_state.closed_set: continue
             if nxt in g_score and tentative >= g_score[nxt]: continue
@@ -376,6 +490,7 @@ def step_cardinal_astar_internal(rc: Controller, sense: Sense, max_expansions: i
         pf_state.failed = True
 
 
+
 # A* Helpers
 
 def get_path():
@@ -394,9 +509,8 @@ def reconstruct_path(came_from, current):
 
 # This is a 2 tier-ed approach, that I implemented for MIT Battlecode translated to python
 # Could have bugs, subject to change
-def silly_pathfind_to(rc: Controller, target: Position):
+def silly_pathfind_to(rc: Controller, sense: Sense, target: Position):
     global pf_state
-
     if pf_state.final_target != target:
         # print('reset virtual target', pf_state.final_target, target)
         pf_state.reset()
@@ -411,10 +525,11 @@ def silly_pathfind_to(rc: Controller, target: Position):
             rc.move(rc.get_position().direction_to(target))
             return True
 
+    if pf_state.computed_this_turn: return False
     
     if rc.get_position() == pf_state.virtual_target:
         pf_state.bug_cooldown = 8
-        recompute_silly_virtual_target(rc)
+        recompute_silly_virtual_target(rc, sense)
     else:
         pf_state.bug_cooldown -= 1
     
@@ -423,7 +538,8 @@ def silly_pathfind_to(rc: Controller, target: Position):
         pf_state.should_bug = False
         return False
     
-    silly_pathfind_to_virtual(rc)
+    silly_pathfind_to_virtual(rc, sense)
+    pf_state.computed_this_turn = True
     if rc.get_position() == target:
         return True
     rc.draw_indicator_line(rc.get_position(), pf_state.virtual_target, 255, 255, 255)
@@ -432,7 +548,7 @@ def silly_pathfind_to(rc: Controller, target: Position):
     return False
 
 
-def recompute_silly_virtual_target(rc: Controller):
+def recompute_silly_virtual_target(rc: Controller, sense: Sense):
     global pf_state
 
     current: Position = pf_state.virtual_target
@@ -502,7 +618,7 @@ def recompute_silly_virtual_target(rc: Controller):
                     pf_state.should_bug = False
                     # print('exit bugmode')
 
-            print("Bug mode: ", current)
+            # print("Bug mode: ", current)
         else:
             # Greedy
             direct_action = current.direction_to(pf_state.final_target)
@@ -520,7 +636,7 @@ def recompute_silly_virtual_target(rc: Controller):
                 pf_state.bug_dir = current.direction_to(pf_state.final_target)
                 pf_state.should_guess_rotation = False
             
-            print("Greedy: ", current)
+            # print("Greedy: ", current)
         
         # rc.draw_indicator_dot(current, 50, 180, 50)
     
@@ -528,52 +644,108 @@ def recompute_silly_virtual_target(rc: Controller):
     # print(pf_state.virtual_target, file=sys.stderr)
 
 
-def silly_pathfind_to_virtual(rc: Controller):
+def silly_pathfind_to_virtual(rc: Controller, sense: Sense):
     global pf_state
 
-    my_loc = rc.get_position()
-    goal = pf_state.virtual_target
+    map_w = sense.map_width
+    map_h = sense.map_height
 
-    if my_loc == goal:
+    my_pos   = rc.get_position()
+    goal_pos = pf_state.virtual_target
+
+    my_x,   my_y   = my_pos.x,   my_pos.y
+    goal_x, goal_y = goal_pos.x, goal_pos.y
+
+    my_flat   = my_y   * map_w + my_x
+    goal_flat = goal_y * map_w + goal_x
+
+    if my_flat == goal_flat:
         return
 
-    width = rc.get_map_width()
-    height = rc.get_map_height()
+    _ENV_COSTS         = ENV_COSTS
+    _ENTITY_COSTS      = ENTITY_COSTS_FAST
+    _is_seen           = sense.is_seen_idxd
+    _get_env           = sense.get_env_idxd
+    _get_entity        = sense.get_entity_idxd
+    _is_allied         = sense.is_allied_idxd
+    _turret_cost_map   = sense.turret_cost_map
+    _WALL              = Environment.WALL
+    _get_tile_builder  = rc.get_tile_builder_bot_id
+    _actually_navvable = actually_navvable_fast
+    my_id              = rc.get_id()
 
-    q = deque([goal])
-    visited = {goal}
+    DIR_TABLE = (
+        ( 0, -1, -map_w     ),
+        ( 0,  1,  map_w     ),
+        ( 1,  0,  1         ),
+        (-1,  0, -1         ),
+        ( 1, -1,  1 - map_w ),
+        (-1, -1, -1 - map_w ),
+        ( 1,  1,  1 + map_w ),
+        (-1,  1, -1 + map_w ),
+    )
+
+    dist   = {goal_flat: 0}
     parent = {}
+    heap   = [(0, goal_flat)]
+    found  = False
 
-    found = False
+    while heap:
+        dcur, cur = heappop(heap)
 
-    while q:
-        cur = q.popleft()
-
-        if cur == my_loc:
+        if cur == my_flat:
             found = True
             break
 
-        for d in DIRECTIONS_ORDERED_CARDINALS_FIRST:
-            nxt = cur.add(d)
+        if dcur > dist[cur]:
+            continue
 
-            if nxt in visited:
-                continue
-            if not actually_navvable(rc, nxt):
-                continue
-            bbid = rc.get_tile_builder_bot_id(nxt)
-            if bbid is not None and bbid != rc.get_id():
+        cx = cur % map_w
+        cy = cur // map_w
+
+        for dx, dy, d_delta in DIR_TABLE:
+            nxt_x = cx + dx
+            nxt_y = cy + dy
+            if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h:
                 continue
 
-            visited.add(nxt)
-            parent[nxt] = cur
-            q.append(nxt)
+            nxt = cur + d_delta
+
+            if not _actually_navvable(rc, sense, nxt, map_w, map_h):
+                continue
+
+            bbid = _get_tile_builder(POSITION_CACHE[nxt])
+            if bbid is not None and bbid != my_id:
+                continue
+
+            cost = 1
+            if _is_seen(nxt):
+                env = _get_env(nxt)
+                if env == _WALL:
+                    continue
+                entt   = _get_entity(nxt)
+                allied = _is_allied(nxt)
+                cost  += _ENV_COSTS[env]
+                cost  += _ENTITY_COSTS[entt][1 - int(allied)]
+                cost  += _turret_cost_map[nxt]
+                if cost >= 100000:
+                    continue
+
+            nd = dcur + cost
+            if nxt not in dist or nd < dist[nxt]:
+                dist[nxt] = nd
+                parent[nxt] = cur
+                heappush(heap, (nd, nxt))
 
     if not found:
-        pf_state.virtual_target = my_loc
+        pf_state.virtual_target = my_pos
         return
 
-    best_pos = parent[my_loc]
-    best_dir = my_loc.direction_to(best_pos)
+    # Reconstruct direction from flat indexes one Position allocation total,
+    # outside the hot loop, only when a path was actually found.
+    best_flat = parent[my_flat]
+    best_pos  = Position(best_flat % map_w, best_flat // map_w)
+    best_dir  = my_pos.direction_to(best_pos)
 
     if rc.can_destroy(best_pos) and should_destroy(rc, best_pos):
         rc.destroy(best_pos)
@@ -584,7 +756,6 @@ def silly_pathfind_to_virtual(rc: Controller):
         rc.build_road(best_pos)
         if rc.can_move(best_dir):
             rc.move(best_dir)
-
 
 
 # Silly Helpers
@@ -622,6 +793,7 @@ def simple_step(rc: Controller, d: Direction):
         rc.build_road(p)
         if rc.can_move(d):
             rc.move(d)
+            pf_state.past_pos = rc.get_position()
 
 def cardinal_virtually_navvable(rc: Controller, pos: Position, incoming_dir: Direction) -> bool:
     if not is_in_map(pos, rc.get_map_width(), rc.get_map_height()):
@@ -650,8 +822,9 @@ def cardinal_unit_virtually_navvable(rc: Controller, pos: Position, non_conveyor
         allied = rc.get_team(bldg) == rc.get_team()
         if rc.get_entity_type(bldg) == EntityType.BARRIER and allied:
             return True
-        if rc.get_entity_type(bldg) in ENTITY_TRANSPORT and allied:
-            return False
+        if rc.get_entity_type(bldg) in ENTITY_TRANSPORT:
+            if not is_protecting_conveyor_simple(rc, pos):
+                return False
     
     return (rc.get_tile_builder_bot_id(pos) is not None) or is_pos_pathable(rc, pos)
 
@@ -679,9 +852,29 @@ def actually_navvable(rc: Controller, pos: Position) -> bool:
         return False
     return is_pos_pathable(rc, pos)
 
+def actually_navvable_fast(rc: Controller, sense: Sense, nxt: int, map_w: int, map_h: int) -> bool:
+    # Bounds and vision check on flat index.
+    nxt_x = nxt % map_w
+    nxt_y = nxt // map_w
+    if nxt_x < 0 or nxt_x >= map_w or nxt_y < 0 or nxt_y >= map_h:
+        return False
+    nxtpos = POSITION_CACHE[nxt]
+    if not rc.is_in_vision(nxtpos):
+        return False
+
+    # Inlined is_pos_pathable.
+    entt = sense.get_entity_idxd(nxt)
+    env = sense.get_env_idxd(nxt)
+    if entt == None or rc.is_tile_passable(nxtpos): return True
+    if env == Environment.WALL: return False
+    allied = sense.is_allied_idxd(nxt)
+    if entt in ENTITY_WALKABLE: return True
+    if allied: return entt in ENTITY_CORE
+    return False
+
 def should_destroy(rc: Controller, pos: Position) -> bool:
     bldg = rc.get_tile_building_id(pos)
     if bldg is None: return False
     entt = rc.get_entity_type(bldg)
     # TODO maybe add more things that should be destroyed here
-    return entt == EntityType.MARKER or entt == EntityType.BARRIER
+    return entt == EntityType.BARRIER
