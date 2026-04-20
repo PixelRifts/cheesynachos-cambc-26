@@ -1014,11 +1014,12 @@ class BuilderBot(Bot):
         if self.econ_connect_saved_target is None:
             self.econ_connect_saved_target, self.econ_connect_saved_is_final = self.compute_next_bridge_target(self.econ_target_is_ax)
             self.econ_connect_protect_target = self.rc.get_position() # if self.econ_connect_current_target is None or self.econ_connect_saved_is_final else None
-            if self.econ_connect_saved_target is None:
+            if self.econ_connect_saved_target is None or self.econ_connect_saved_target in ENTITY_TRANSPORT:
                 self.switch_to_econ()
                 return
             self.econ_connect_saved_is_bridge = self.should_bridge_heuristic(self.rc.get_position(), self.econ_connect_saved_target, BRIDGE_USAGE_CUTOFF) or \
                 (self.econ_connect_saved_is_final and self.econ_target_is_ax)
+                
         self.rc.draw_indicator_dot(self.econ_connect_saved_target, 0, 0, 255)
         
         # print('3', self.econ_connect_saved_is_bridge)
@@ -1140,7 +1141,9 @@ class BuilderBot(Bot):
             
             if go_back and not changed:
                 starting_from = curr
+                stuck_for = self.stuck_counter
                 self.switch_state(back_is)
+                self.stuck_counter = stuck_for
                 self.defence_current_target = starting_from
                 return
 
