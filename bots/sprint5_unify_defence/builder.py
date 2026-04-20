@@ -489,6 +489,10 @@ class BuilderBot(Bot):
             moved = True
             # no return - allow immediate heal
         
+        ti = self.rc.get_global_resource_amount()[0]
+        if ti < self.rc.get_launcher_cost()[0] + 50 and strong_counter:
+            return moved
+
         if self.sense.is_allied(target):
             if self.rc.can_destroy(target):
                 self.rc.destroy(target)
