@@ -584,6 +584,7 @@ class BuilderBot(Bot):
         to_heal = None
         to_heal_dist = 100000
         for t in self.sense.heal_targets:
+            if not self.rc.is_in_vision(t): continue
             d = self.rc.get_position().distance_squared(t)
             if d < to_heal_dist:
                 to_heal_dist = d

@@ -403,7 +403,6 @@ class BuilderBot(Bot):
         if best_poi is not None:
             last_state = self.state
             target, frm, plan, _ = micro.poi_attack_plan(self.rc, self.sense, best_poi, self.enemy_core_pos)
-            # Try @here different turret randomly
             plan = plan if best_already_has_sentinel else EntityType.SENTINEL
             self.switch_state(BotState.ATTACK_EXEC_PLAN)
             self.attack_target = target
@@ -601,6 +600,7 @@ class BuilderBot(Bot):
         to_heal = None
         to_heal_dist = 100000
         for t in self.sense.heal_targets:
+            if not self.rc.is_in_vision(t): continue
             d = self.rc.get_position().distance_squared(t)
             if d < to_heal_dist:
                 to_heal_dist = d
@@ -1221,97 +1221,25 @@ class BuilderBot(Bot):
         else:
             pathfind.silly_pathfind_to(self.rc, self.sense, self.pathfind_target)
 
-        # # Find econ crippling target
-        # budget = min(1200, self.rc.get_cpu_time_elapsed() + 500)
-        # # print('regular', self.rc.get_cpu_time_elapsed())
-        # closest_harvester = None
-        # closest_harvester_dist = 10000000
-        # harvesters = self.sense.harvesters
-        # for h in harvesters:
-        #     if self.should_attack_harvester(h):
-        #         dist = h.distance_squared(my_pos)
-        #         if dist < closest_harvester_dist:
-        #             closest_harvester_dist = dist
-        #             closest_harvester = h
-            
-        #     if self.rc.get_cpu_time_elapsed() > budget:
-        #         print('breaking')
-        #         break
-
-        # if closest_harvester is not None:
-        #     target_dir = get_best_placable_adj_ignorebb(self.rc, closest_harvester, self.rc.get_position())
-        #     target_pos = closest_harvester.add(target_dir)
-        #     if target_pos not in self.attack_blacklist_set and self.sense.get_entity(target_pos) not in ENTITY_ATTACK_NOREPLACE:
-        #         self.switch_state(BotState.ATTACK_EXEC_PLAN)
-        #         self.attack_target = target_pos
-        #         self.attack_feeder = closest_harvester
-        #         self.attack_plan = EntityType.SENTINEL
-        #         self.attack_plan_dir = target_pos.direction_to(self.enemy_core_pos)
-        #         if self.attack_plan_dir == target_pos.direction_to(closest_harvester): self.attack_plan_dir = self.attack_plan_dir.rotate_left()
-        #         self.attack_from = target_pos.add(get_best_pathable_adj_with_diag(self.rc, target_pos, my_pos))
-        #         self.attack_return_to_econ = False
-        #         self.rc.draw_indicator_dot(target_pos, 255, 0, 0)
-        #         return
-        
-
         # Possibly eliminate symmetry
-        if self.sense.is_seen(self.enemy_core_pos):
-            if self.sense.get_entity(self.pathfind_target) != EntityType.CORE:
-                self.sense.eliminate_next_symmetry()
 
-        # Find suitable attack target
-        # if self.sense.enemy_core_found is not None:
-        #     budget = min(1500, self.rc.get_cpu_time_elapsed() + 500)
-        #     # print('atenemycore', self.rc.get_cpu_time_elapsed())
-        #     attack_possibilities = []
-        #     transports = self.sense.enemy_transports
-        #     for c in transports:
-        #         if c in self.sense.transport_attack_blacklist: continue
-        #         if c in self.attack_blacklist_set: continue
-        #         if not self.rc.is_in_vision(c): continue
-        #         bldg = self.rc.get_tile_building_id(c)
-                
-        #         if self.rc.get_stored_resource_id(bldg) is None: continue
-        #         if c.distance_squared(self.enemy_core_pos) > GameConstants.GUNNER_VISION_RADIUS_SQ: continue
-        #         if c in self.sense.ally_builders: continue
-
-        #         attack_possibilities.append((c, True, None))
-        #         if self.rc.get_cpu_time_elapsed() > budget:
-        #             print('breaking')
-        #             break
-
-        #     # print('atenemycore haarvesters', self.rc.get_cpu_time_elapsed())
-        #     for h in harvesters:
-        #         for d in CARDINAL_DIRECTIONS:
-        #             c = h.add(d)
-        #             if not is_in_map(c, self.sense.map_width, self.sense.map_height): continue
-        #             if c in self.sense.transport_attack_blacklist: continue
-        #             if c in self.attack_blacklist_set: continue
-        #             if not self.rc.is_in_vision(c): continue
-        #             if not is_pos_turretable(self.rc, c): continue
-                    
-        #             # Also make sure there are actually enemy bldgs to attack nearby
-        #             # if c.distance_squared(self.enemy_core_pos) > GameConstants.GUNNER_VISION_RADIUS_SQ: continue
-        #             if c in self.sense.ally_builders: continue
-
-        #             attack_possibilities.append((c, True, h))
-        #         if self.rc.get_cpu_time_elapsed() > budget:
-        #             print('breaking')
-        #             break
-            
-            # if len(attack_possibilities) > 0:
-            #     self.switch_state(BotState.ATTACK_EXEC_PLAN)
-            #     c, is_sentinel, feeder = random.choice(attack_possibilities)
-            #     self.attack_target = c
-            #     self.attack_feeder = feeder
-            #     self.attack_plan = EntityType.SENTINEL if is_sentinel else EntityType.GUNNER
-            #     self.attack_plan_dir = c.direction_to(self.enemy_core_pos)
-            #     if feeder is not None:
-            #         if self.attack_plan_dir == c.direction_to(feeder): self.attack_plan_dir = self.attack_plan_dir.rotate_left()
-            #     self.attack_from = c.add(get_best_pathable_adj_with_diag(self.rc, c, my_pos))
-            #     self.attack_return_to_econ = False
-            #     self.rc.draw_indicator_dot(self.attack_target, 255, 0, 0)
-            #     return
+        if self.sense.enemy_core_found is None:
+            if self.sense.is_seen(self.enemy_core_pos):
+                if self.sense.get_entity(self.pathfind_target) != EntityType.CORE:
+                    self.sense.eliminate_next_symmetry()
+        else:
+            # Launcher spam?
+            if self.rc.is_in_vision(self.enemy_core_pos):
+                if len(self.sense.ally_builders) >= len(self.sense.enemy_builders):
+                    my_pos = self.rc.get_position()
+                    turret_dir = get_best_launcher_placable_adj_with_diag(self.rc, my_pos, my_pos)
+                    if turret_dir != Direction.CENTRE:
+                        turretable_pos = my_pos.add(turret_dir)
+                        if self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.LAUNCHER) + 20:
+                            if self.rc.can_destroy(turretable_pos):
+                                self.rc.destroy(turretable_pos)
+                            if self.rc.can_build_launcher(turretable_pos):
+                                self.rc.build_launcher(turretable_pos)
 
     def attack_block_ore(self):
         pass

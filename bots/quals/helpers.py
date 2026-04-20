@@ -216,6 +216,46 @@ def get_best_placable_adj_with_diag(rc: Controller, a: Position, b: Position) ->
             best_dir = d
     return best_dir
 
+
+def get_best_launcher_placable_adj_with_diag(rc: Controller, a: Position, b: Position) -> Direction:
+    best_score = -10**9
+    best_dist = 10**9
+    best_dir = Direction.CENTRE
+
+    for d in DIRECTIONS:
+        p = a.add(d)
+
+        if not is_in_map(p, rc.get_map_width(), rc.get_map_height()): continue
+        if not rc.is_in_vision(p): continue
+        if rc.get_tile_builder_bot_id(p) is not None: continue
+        if not (is_pos_turretable(rc, p) and not is_enemy_transport(rc, p)): continue
+
+        builders = 0
+        launcher_penalty = 0
+
+        for nd in DIRECTIONS:
+            adj = p.add(nd)
+            if not is_in_map(adj, rc.get_map_width(), rc.get_map_height()): continue
+            bb = rc.get_tile_builder_bot_id(adj)
+            if bb is not None and rc.get_team(bb) != rc.get_team():
+                builders += 1
+
+            e = rc.get_tile_building_id(adj)
+            if e is not None:
+                if rc.get_entity_type(e) == EntityType.LAUNCHER:
+                    launcher_penalty += 1
+
+        # combine score (weight builders higher than penalty if desired)
+        score = builders * 6 - launcher_penalty * 10
+
+        dist = p.distance_squared(b)
+
+        if score > best_score or (score == best_score and dist < best_dist):
+            best_score = score
+            best_dist = dist
+            best_dir = d
+    return best_dir
+
 def get_best_pathable_adj_with_diag(rc: Controller, pos: Position, heu: Position) -> Direction:
     best_dist = 1000000
     best_dir = Direction.CENTRE
