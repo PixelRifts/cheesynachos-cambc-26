@@ -629,16 +629,10 @@ class BuilderBot(Bot):
 
             my_pos = self.rc.get_position()
             has_enemy_targeting = False
-            launcher_candidate = None
-            for d in DIRECTIONS:
-                p = my_pos.add(d)
-                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-                if p in self.sense.enemy_builders: has_enemy_targeting = True
-                if is_pos_quickly_turretable(self.rc, p): launcher_candidate = p
+            launcher_candidate = my_pos.add(get_best_launcher_necessary_placable_adj_with_diag(self.rc, my_pos, my_pos))
             
             has_enough_ti = self.sense.ti_tracker[-1] > get_ti_cost(self.rc, EntityType.LAUNCHER) + 20
-            if has_enemy_targeting and launcher_candidate is not None and \
-                has_enough_ti and not self.is_launcher_protected(my_pos):
+            if launcher_candidate != my_pos and has_enough_ti and not self.is_launcher_protected(my_pos):
                 if self.rc.can_destroy(launcher_candidate):
                     self.rc.destroy(launcher_candidate)
                 if self.rc.can_build_launcher(launcher_candidate):
@@ -1287,17 +1281,10 @@ class BuilderBot(Bot):
         
         # Launcher place mode
         my_pos = self.rc.get_position()
-        has_enemy_targeting = False
-        launcher_candidate = None
-        for d in DIRECTIONS:
-            p = my_pos.add(d)
-            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-            if p in self.sense.enemy_builders: has_enemy_targeting = True
-            if is_pos_quickly_turretable(self.rc, p): launcher_candidate = p
+        launcher_candidate = my_pos.add(get_best_launcher_necessary_placable_adj_with_diag(self.rc, my_pos, my_pos))
 
         has_enough_ti = self.sense.ti_tracker[-1] > (get_ti_cost(self.rc, EntityType.LAUNCHER) * 2)
-        if has_enemy_targeting and launcher_candidate is not None and \
-            has_enough_ti and not self.is_launcher_protected(my_pos):
+        if launcher_candidate != my_pos and has_enough_ti and not self.is_launcher_protected(my_pos):
             if self.rc.can_destroy(launcher_candidate):
                 self.rc.destroy(launcher_candidate)
             if self.rc.can_build_launcher(launcher_candidate):
@@ -1308,7 +1295,7 @@ class BuilderBot(Bot):
         entt = self.sense.get_entity(self.attack_target)
         allied = self.sense.is_allied(self.attack_target)
         
-        invalid = not is_pos_turretable(self.rc, self.attack_target) and not is_protecting_conveyor(self.rc, self.sense, p)
+        invalid = not is_pos_turretable(self.rc, self.attack_target) and not is_protecting_conveyor(self.rc, self.sense, self.attack_target)
         if invalid:
             # print(self.attack_target, 'stuff done here')
             expiry = self.rc.get_current_round() + 100
