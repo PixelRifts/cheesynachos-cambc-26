@@ -63,6 +63,15 @@ class Sentinel(Bot):
                 if score < 0: continue
                 
                 score -= ((self.rc.get_hp(e) / self.attack_dmg) * 10)
+                
+                for d in CARDINAL_DIRECTIONS:
+                    adj = p.add(d)
+                    if not is_in_map(adj, self.rc.get_map_width(), self.rc.get_map_height()): continue
+                    if not self.rc.is_in_vision(adj): continue
+                    bldg = self.rc.get_tile_building_id(adj)
+                    if self.rc.get_entity_type(bldg) == EntityType.HARVESTER:
+                        score += 20
+
                 valid = True
 
             if bb is not None:
