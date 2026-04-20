@@ -101,7 +101,9 @@ class BuilderBot(Bot):
             case self.rush_spawn_pos: self.job = BotJob.RUSH
             case _: self.job = BotJob.ECON
         match self.job:
-            case BotJob.HEAL: self.switch_state(BotState.CORE_HEALER)
+            case BotJob.HEAL:
+                self.switch_state(BotState.CORE_HEALER)
+                self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
             case BotJob.ECON: self.switch_to_econ()
             case BotJob.RUSH: self.switch_state(BotState.ATTACK_GOTO)
                 
@@ -153,6 +155,7 @@ class BuilderBot(Bot):
         self.attack_from: Position = None
         self.attack_return_to = None
         self.attack_plan_timeout = 30
+        self.attack_mode = False
         
     def switch_state(self, state: BotState):
         self.state = state
@@ -808,7 +811,6 @@ class BuilderBot(Bot):
             self.econ_target_is_ax = is_ax
 
     def econ_target(self):
-
         # print('post harvester validation')
         if self.sense.get_entity(self.econ_target_ore) == EntityType.HARVESTER:
             # print('[ECON_HARVESTER]', self.econ_target_ore)
@@ -928,7 +930,6 @@ class BuilderBot(Bot):
                 print('couldnt build at ', self.econ_target_ore)
                 # (ti, ax) = self.rc.get_global_resources()
                 return
-        
 
     def econ_connect(self):
         # Compute next target part
@@ -981,8 +982,6 @@ class BuilderBot(Bot):
                         self.econ_connect_past_pos = None
                         self.recompute_econ_connect_target()
                         print('else - else')
-
- 
 
     def recompute_econ_connect_target(self):
         print('recompute')
@@ -1045,30 +1044,15 @@ class BuilderBot(Bot):
             # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
         
-        
-        if self.attack_mode:
-            score_threshold, skip = micro.score_attack_poi(self.rc, self.sense, self.attack_target, self.core_pos)
-            if skip: score_threshold = 0
-        else:
-            score_threshold, skip = micro.score_defence_poi(self.rc, self.sense, self.attack_target)
-            if skip: score_threshold = 0
-        
-        last_state = self.attack_return_to
-        if self.micro_try_attack(min_threshold=score_threshold+5):
-            skip = False
-            self.attack_return_to = last_state
-            print('redoing')
-            
-        if skip:
-            self.switch_back_to_neutral(self.attack_return_to)    
-            return
-        
         # print('uneditable check', self.attack_target)
         if not is_pos_editable(self.rc, self.attack_target):
             print(self.attack_target, 'is uneditable')
             self.switch_back_to_neutral(self.attack_return_to)
             return
 
+        entt = self.sense.get_entity(self.attack_target)
+        allied = self.sense.is_allied(self.attack_target)
+        
         # print('try destroy', self.attack_target)
         if entt == self.attack_plan or (allied and entt in ENTITY_ATTACK_NOREPLACE):
             self.switch_back_to_neutral(self.attack_return_to)
@@ -1117,42 +1101,77 @@ class BuilderBot(Bot):
         pass
     
     def defence_follow(self, graph, back_is: BotState):
-        # Forward Current Target
-        if is_adjacent_with_diag(self.rc.get_position(), self.defence_current_target):
-            # Iterate Backwards from defence_current_target a max of 5 times
+        my_pos = self.rc.get_position()
+
+        # Init fallback if target somehow missing
+        if self.defence_current_target is None:
+            return
+
+        # If we reached target, softly advance along graph
+        if is_adjacent_with_diag(my_pos, self.defence_current_target):
             curr = self.defence_current_target
-            go_back = False
-            changed = False
-            for i in range(2):
-                t = graph.get(curr, [])
-                t = [j for j in t if self.rc.is_in_vision(j) and self.sense.get_entity(j) in ENTITY_TRANSPORT]
-                found = None if len(t) == 0 else random.choice(t)
-                if found == None or found in self.sense.ally_builders or \
-                    found in self.core_tiles:
-                    go_back = True
-                    break
-                self.defence_use_fast = not is_adjacent(self.rc.get_position(), found)
-                curr = found
-                changed = True
-            
-            if go_back and not changed:
-                starting_from = curr
+            next_nodes = graph.get(curr, [])
+            next_nodes = [
+                j for j in next_nodes
+                if self.rc.is_in_vision(j)
+                and self.sense.get_entity(j) in ENTITY_TRANSPORT
+                and j not in self.sense.ally_builders
+                and j not in self.core_tiles
+            ]
+
+            if not next_nodes:
+                # reverse direction if dead end
                 self.switch_state(back_is)
-                self.defence_current_target = starting_from
                 return
 
-            self.defence_current_target = curr
+            # pick a loose next target (not strict)
+            self.defence_current_target = random.choice(next_nodes)
 
-        # Actually Pathfind
-        if self.defence_current_target is not None:
-            if self.defence_current_target == self.rc.get_position():
-                self.switch_to_econ()
-                return
-            # if self.defence_use_fast:
-            #     pathfind.fast_pathfind_to(self.rc, self.sense, self.defence_current_target, ignore_builder_at_tgt=True)
-            # else:
+        # --- FLOW MOVEMENT ---
+        # Instead of pathing strictly to target, bias direction
+
+        candidates = graph.get(self.defence_current_target, [])
+        candidates = [
+            j for j in candidates
+            if self.rc.is_in_vision(j)
+            and self.sense.get_entity(j) in ENTITY_TRANSPORT
+        ]
+
+        dx, dy = 0, 0
+
+        # include current target as strong attractor
+        tx = self.defence_current_target.x - my_pos.x
+        ty = self.defence_current_target.y - my_pos.y
+        dx += 2 * tx
+        dy += 2 * ty
+
+        # blend in neighbors for flow
+        for nxt in candidates:
+            vx = nxt.x - my_pos.x
+            vy = nxt.y - my_pos.y
+            dx += vx
+            dy += vy
+
+        # small randomness to avoid rigidity
+        if random.random() < 0.15:
+            dx += random.choice([-1, 0, 1])
+            dy += random.choice([-1, 0, 1])
+
+        # normalize to step
+        step_x = 0 if dx == 0 else (1 if dx > 0 else -1)
+        step_y = 0 if dy == 0 else (1 if dy > 0 else -1)
+
+        flow_target = Position(my_pos.x + step_x, my_pos.y + step_y)
+        self.rc.draw_indicator_dot(flow_target, 0, 255, 255)
+
+        # fallback if blocked
+        if not is_in_map(flow_target, self.sense.map_width, self.sense.map_height) or \
+        not self.sense.is_reachable(flow_target):
             pathfind.silly_pathfind_to(self.rc, self.sense, self.defence_current_target)
-
+        else:
+            pathfind.silly_pathfind_to(self.rc, self.sense, flow_target)
+        
+    
     def defence_station(self):
         if self.sense.ally_builders > 3:
             self.switch_to_econ()
@@ -1211,16 +1230,25 @@ class BuilderBot(Bot):
             (Direction.WEST, Direction.NORTHWEST),
             (Direction.WEST, Direction.SOUTHWEST),
         ]
-        for a,b in ds:
-            pf = self.core_pos.add(a)
-            p = pf.add(b)
-            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-            if self.sense.get_env(p) == Environment.WALL: continue
+        
+        if len(self.sense.heal_targets) == 0:
+            for a,b in ds:
+                pf = self.core_pos.add(a)
+                p = pf.add(b)
+                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+                if self.sense.get_env(p) == Environment.WALL: continue
 
-            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
-                if not try_destroy(self.rc, self.sense, pf, p): return
-                if self.rc.can_build_road(p): self.rc.build_road(p)
-        pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
+                if self.sense.get_entity(p) == EntityType.MARKER or \
+                    (self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p)):
+                    if not try_destroy(self.rc, self.sense, pf, p): return
+                    if self.rc.can_build_road(p): self.rc.build_road(p)
+
+            if self.pathfind_target == None:
+                self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
+            self.rc.draw_indicator_dot(self.pathfind_target, 0, 255, 255)
+            res = pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
+            if res or pathfind.pf_state.failed:
+                self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
 
     # Attack
 
@@ -1353,6 +1381,24 @@ class BuilderBot(Bot):
             pathfind.fast_pathfind_to(self.rc, self.sense, self.attack_target, ignore_builder_at_tgt=True)
             # pathfind.silly_pathfind_to(self.rc, self.sense, self.attack_target)
             if not self.rc.is_in_vision(self.attack_target): return
+
+        if self.attack_mode:
+            score_threshold, skip = micro.score_attack_poi(self.rc, self.sense, self.attack_target, self.core_pos)
+            if skip: score_threshold = 0
+        else:
+            score_threshold, skip = micro.score_defence_poi(self.rc, self.sense, self.attack_target)
+            if skip: score_threshold = 0
+        
+        last_state = self.attack_return_to
+        if self.micro_try_attack(min_threshold=score_threshold+5):
+            skip = False
+            self.attack_return_to = last_state
+            print('redoing')
+            
+        if skip:
+            self.switch_back_to_neutral(self.attack_return_to)    
+            return
+
 
         # Possibly broken logic but still trying
         if not self.rc.get_position() != self.attack_target:
@@ -1821,6 +1867,7 @@ class BuilderBot(Bot):
             self.switch_to_econ()
         elif to_state == BotState.CORE_HEALER:
             self.switch_state(BotState.CORE_HEALER)
+            self.pathfind_target = random_tile_biased(self.core_pos, 3, 4, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
         elif to_state in DEFENCE_STATES:
             self.switch_state(BotState.DEFENCE_TO_HARVESTER)
         else:
@@ -1830,7 +1877,8 @@ class BuilderBot(Bot):
     def switch_to_possibly_patrol(self):
         # print('possiblypatrol before', self.rc.get_cpu_time_elapsed())
         # patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)
-        patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
+        # patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
+        patrol_condition = random.randint(0, 3) < 3
         # print('possiblypatrol after', self.rc.get_cpu_time_elapsed())
         if not patrol_condition:
             self.switch_to_econ()
