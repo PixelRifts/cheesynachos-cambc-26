@@ -101,9 +101,7 @@ class BuilderBot(Bot):
             case self.rush_spawn_pos: self.job = BotJob.RUSH
             case _: self.job = BotJob.ECON
         match self.job:
-            case BotJob.HEAL:
-                self.switch_state(BotState.CORE_HEALER)
-                self.pathfind_target = random_tile_biased(self.core_pos, 0, 1, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
+            case BotJob.HEAL: self.switch_state(BotState.CORE_HEALER)
             case BotJob.ECON: self.switch_to_econ()
             case BotJob.RUSH: self.switch_state(BotState.ATTACK_GOTO)
                 
@@ -478,6 +476,7 @@ class BuilderBot(Bot):
         if target is None: return False
         moved = False
         self.rc.draw_indicator_dot(target, 0, 255, 0)
+        my_pos = self.rc.get_position()
         
         if self.rc.get_position().distance_squared(target) > GameConstants.ACTION_RADIUS_SQ:
             pathfind.silly_pathfind_to(self.rc, self.sense, target) # shud avoid launchers
@@ -485,7 +484,7 @@ class BuilderBot(Bot):
             moved = True
             # no return - allow immediate heal
         
-        ti = self.rc.get_global_resource_amount()[0]
+        ti = self.rc.get_global_resources()[0]
         if ti < self.rc.get_launcher_cost()[0] + 50 and strong_counter:
             return moved
 
@@ -498,7 +497,6 @@ class BuilderBot(Bot):
             self.rc.build(EntityType.LAUNCHER, target)
             print("[LAUNCHER] Built", target)
         return moved
-
 
 
                 
@@ -584,6 +582,18 @@ class BuilderBot(Bot):
 
     def meta_nearest_heal(self):
         self.stuck_counter -= 1
+
+        # def not_my_problem(pos: Position) -> bool:
+        #     if self.rc.is_in_vision(pos):
+        #         bb = self.rc.get_tile_builder_bot_id(pos)
+        #         if bb is not None and bb != self.rc.get_id() and self.rc.get_team(bb) == self.rc.get_team():
+        #             return True # an allied builder bot at location.
+
+        #     for d in DIRECTIONS:
+        #         adj = pos.add(d)
+        #         if adj in self.sense.ally_builders:
+        #             return True
+        #     return False # vulnerable building that needs healing
 
         replace = self.replace_if_needed()
         launcher_def = self.counter_launcher()
@@ -1183,25 +1193,16 @@ class BuilderBot(Bot):
             (Direction.WEST, Direction.NORTHWEST),
             (Direction.WEST, Direction.SOUTHWEST),
         ]
-        
-        if len(self.sense.heal_targets) == 0:
-            for a,b in ds:
-                pf = self.core_pos.add(a)
-                p = pf.add(b)
-                if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
-                if self.sense.get_env(p) == Environment.WALL: continue
+        for a,b in ds:
+            pf = self.core_pos.add(a)
+            p = pf.add(b)
+            if not is_in_map(p, self.sense.map_width, self.sense.map_height): continue
+            if self.sense.get_env(p) == Environment.WALL: continue
 
-                if self.sense.get_entity(p) == EntityType.MARKER or \
-                    (self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p)):
-                    if not try_destroy(self.rc, self.sense, pf, p): return
-                    if self.rc.can_build_road(p): self.rc.build_road(p)
-
-            if self.pathfind_target == None:
-                self.pathfind_target = random_tile_biased(self.core_pos, 0, 1, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
-            self.rc.draw_indicator_dot(self.pathfind_target, 0, 255, 255)
-            res = pathfind.fast_pathfind_to(self.rc, self.sense, self.pathfind_target)
-            if res or pathfind.pf_state.failed:
-                self.pathfind_target = random_tile_biased(self.core_pos, 0, 1, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
+            if self.sense.get_entity(p) != EntityType.ROAD and not self.sense.is_allied(p):
+                if not try_destroy(self.rc, self.sense, pf, p): return
+                if self.rc.can_build_road(p): self.rc.build_road(p)
+        pathfind.silly_pathfind_to(self.rc, self.sense, self.core_pos)
 
     # Attack
 
@@ -1802,7 +1803,6 @@ class BuilderBot(Bot):
             self.switch_to_econ()
         elif to_state == BotState.CORE_HEALER:
             self.switch_state(BotState.CORE_HEALER)
-            self.pathfind_target = random_tile_biased(self.core_pos, 0, 1, self.sense.map_width, self.sense.map_height, (1,0), bias_strength=0.0)
         elif to_state in DEFENCE_STATES:
             self.switch_state(BotState.DEFENCE_TO_HARVESTER)
         else:
@@ -1813,7 +1813,6 @@ class BuilderBot(Bot):
         # print('possiblypatrol before', self.rc.get_cpu_time_elapsed())
         # patrol_condition = self.astar_test_heuristic(self.rc.get_position(), self.core_pos, 5)
         patrol_condition = chebyshev_distance(self.rc.get_position(), self.core_pos) >= 5
-        # patrol_condition = random.randint(0, 99) < 50
         # print('possiblypatrol after', self.rc.get_cpu_time_elapsed())
         if not patrol_condition:
             self.switch_to_econ()

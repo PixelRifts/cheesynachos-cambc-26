@@ -102,3 +102,34 @@ def is_protecting_conveyor(rc: Controller, sense: Sense, pos: Position) -> bool:
     if not sense.is_seen(going_to): return True
     if sense.get_entity(going_to) == EntityType.HARVESTER: return True
     return False
+
+
+_DIR_TO_DELTA = None
+
+def is_protecting_conveyor_fast(rc: Controller, sense: Sense, pos: int, map_w: int, map_h: int) -> bool:
+    global _DIR_TO_DELTA
+    if _DIR_TO_DELTA is None:
+        _DIR_TO_DELTA = {
+            Direction.NORTH:     ( 0, -1, -map_w     ),
+            Direction.SOUTH:     ( 0,  1,  map_w     ),
+            Direction.EAST:      ( 1,  0,  1         ),
+            Direction.WEST:      (-1,  0, -1         ),
+            Direction.NORTHEAST: ( 1, -1,  1 - map_w ),
+            Direction.NORTHWEST: (-1, -1, -1 - map_w ),
+            Direction.SOUTHEAST: ( 1,  1,  1 + map_w ),
+            Direction.SOUTHWEST: (-1,  1, -1 + map_w ),
+        }
+    d = sense.get_direction_idxd(pos)
+    dx, dy, delta = _DIR_TO_DELTA[d]
+
+    px = pos % map_w
+    py = pos // map_w
+    nx = px + dx
+    ny = py + dy
+    if nx < 0 or nx >= map_w or ny < 0 or ny >= map_h:
+        return True  # off-map destination treated as safe
+
+    going_to = pos + delta
+    if not sense.is_seen_idxd(going_to): return True
+    if sense.get_entity_idxd(going_to) == EntityType.HARVESTER: return True
+    return False
