@@ -21,7 +21,7 @@ priorities = {
     EntityType.FOUNDRY: 100,
     EntityType.ROAD: 1,
     EntityType.BARRIER: 8,
-    EntityType.MARKER: 1,
+    EntityType.MARKER: -100,
 }
 
 # TODO prioritize transport that is deemed "critical"

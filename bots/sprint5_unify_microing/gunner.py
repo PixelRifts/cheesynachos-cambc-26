@@ -4,7 +4,7 @@ import sys
 from enum import Enum
 from bot import Bot
 from cambc import Controller, Direction, EntityType, Environment, Position, GameConstants
-from helpers import DIRECTIONS
+from helpers import *
 
 # Priority map for targeting
 PRIORITIES = {
@@ -84,6 +84,33 @@ class Gunner(Bot):
                 best_tile = p
 
         return best_tile, max_priority
+    
+    def get_first_in_my_dir(self) -> Position:
+        d = self.rc.get_direction()
+        maxidx = 3 if d in CARDINAL_DIRECTIONS else 2
+        iterpos = self.rc.get_position()
+        for i in range(0, maxidx):
+            iterpos = iterpos.add(d)
+            if not is_in_map(iterpos, self.rc.get_map_width(), self.rc.get_map_height()): break
+            if self.rc.get_tile_env(iterpos) == Environment.WALL: break
+            
+            self.rc.draw_indicator_dot(iterpos, 255, 255, 255)
+            e = self.rc.get_tile_building_id(iterpos)
+            entt = self.rc.get_entity_type(e)
+            bb = self.rc.get_tile_builder_bot_id(iterpos)
+            
+            if bb is not None:
+                if self.rc.get_team(bb) != self.rc.get_team():
+                    return iterpos
+                else:
+                    return None
+
+            if e is not None and self.rc.get_team(e) != self.rc.get_team():
+                if entt == EntityType.MARKER: continue
+                if self.rc.get_team(e) != self.rc.get_team():
+                    return iterpos
+                elif entt != EntityType.ROAD:
+                    return None
 
     def start_turn(self):
         # Reset target at the start of every turn to avoid stale data
@@ -107,7 +134,8 @@ class Gunner(Bot):
                 continue
 
             tile, priority = self.get_best_in_range(tiles)
-            
+            if tile is not None: self.rc.draw_indicator_dot(tile, 255, 0, 0)
+
             if tile and priority > best_overall_priority:
                 best_overall_priority = priority
                 best_direction = d
@@ -119,8 +147,10 @@ class Gunner(Bot):
 
         # 2. Rotate to face the best target if necessary
         if best_direction is not None and best_direction != self.rc.get_direction():
-            if self.rc.can_rotate(best_direction) and self.rc.get_ammo_amount() != 0:
+            if self.rc.can_rotate(best_direction) and self.rc.get_global_resources()[0] > 50 and self.rc.get_ammo_amount() != 0 and best_overall_priority > 10:
                 self.rc.rotate(best_direction)
+            else:
+                self.best_target = None
 
     # def turn(self):
     #     target  = self.rc.get_gunner_target()
@@ -130,17 +160,25 @@ class Gunner(Bot):
 
     def turn(self):
         # If no target was found in start_turn, don't attempt to fire
-        if not self.best_target:
-            return
+        print('here')
+        if self.best_target is None: return
+        print('here', self.best_target)
 
-        if self.rc.can_fire(self.best_target):
-            bb = self.rc.get_tile_builder_bot_id(self.best_target)
+        gt = self.get_first_in_my_dir()
+        print('here', gt)
+        if not gt: return
+        self.rc.draw_indicator_dot(gt, 200, 200, 200)
+        print(gt)
+        if self.rc.can_fire(gt):
+            bb = self.rc.get_tile_builder_bot_id(gt)
             if bb is not None and self.rc.get_team(bb) == self.rc.get_team():
+                print('excon1')
                 return
-            e = self.rc.get_tile_building_id(self.best_target)
+            e = self.rc.get_tile_building_id(gt)
             if e is not None and self.rc.get_team(e) == self.rc.get_team() and not (bb is not None and self.rc.get_team(bb) != self.rc.get_team()):
+                print('excon2')
                 return
-            self.rc.fire(self.best_target)
+            self.rc.fire(gt)
 
     def end_turn(self):
         pass

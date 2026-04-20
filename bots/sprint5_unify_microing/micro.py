@@ -26,6 +26,7 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
 
     is_empty = rc.is_tile_empty(poi) or sense.is_allied(poi) or sense.get_entity(poi) == EntityType.MARKER
     if is_empty: score += 100
+    if poi in sense.enemy_builders: return 0, True
 
     # Axionite not secured penalty
     roundnum = rc.get_current_round()
@@ -64,15 +65,19 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
         p1 = poi.add(d)
         if not is_in_map(p1, sense.map_width, sense.map_height): continue
         if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) == EntityType.HARVESTER: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1): score += 15
+        p1entt = sense.get_entity(p1)
+        p1enemy = not sense.is_allied(p1)
+        if p1entt == EntityType.LAUNCHER and p1enemy: return 0, True
+        if p1entt == EntityType.HARVESTER: continue
+        if p1entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and p1enemy: score += 15
         if p1 in sense.enemy_builders: score += 20
         
         p2 = p1.add(d)
         if not is_in_map(p2, sense.map_width, sense.map_height): continue
         if sense.get_env(p2) == Environment.WALL: continue
-        if sense.get_entity(p2) == EntityType.HARVESTER: continue
-        if sense.get_entity(p2) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
+        p2entt = sense.get_entity(p2)
+        if p2entt == EntityType.HARVESTER: continue
+        if p2entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p2): score += 10
         if p2 in sense.enemy_builders: score += 20
         
         if d not in CARDINAL_DIRECTIONS: continue
@@ -80,7 +85,8 @@ def score_attack_poi(rc: Controller, sense: sense.Sense, poi: Position, core_pos
         p3 = p2.add(d)
         if not is_in_map(p3, sense.map_width, sense.map_height): continue
         if sense.get_env(p3) == Environment.WALL: continue
-        if sense.get_entity(p3) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3): score += 6
+        p3entt = sense.get_entity(p3)
+        if p3entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p3): score += 6
         if p3 in sense.enemy_builders: score += 10
     
     return score, False
@@ -107,8 +113,11 @@ def score_defence_poi(rc: Controller, sense: sense.Sense, poi: Position) -> (int
         p1 = poi.add(d)
         if not is_in_map(p1, sense.map_width, sense.map_height): continue
         if sense.get_env(p1) == Environment.WALL: continue
-        if sense.get_entity(p1) == EntityType.HARVESTER: continue
-        if sense.get_entity(p1) in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and not sense.is_allied(p1): score += 15
+        p1entt = sense.get_entity(p1)
+        p1enemy = not sense.is_allied(p1)
+        if p1entt == EntityType.LAUNCHER and p1enemy: return 0, True
+        if p1entt == EntityType.HARVESTER: continue
+        if p1entt in ENTITY_MICRO_USE_GUNNERS_TO_DISABLE and p1enemy: score += 15
         if p1 in sense.enemy_builders: score += 20
         
         p2 = p1.add(d)
@@ -190,7 +199,7 @@ PRIORITIES = {
     EntityType.MARKER: 1,
 }
 
-def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, entt: EntityType, enemy_core_pos: Position) -> Direction:
+def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, entt: EntityType, enemy_core_pos: Position, exclude_dir=None) -> Direction:
     max_dir = None
     max_dir_score = -1000000
 
@@ -207,6 +216,7 @@ def compute_best_turret_dir(rc: Controller, sense: sense.Sense, poi: Position, e
     for d in DIRECTIONS:
         # if this is the only direction that feeds this turret
         if len(feed_dirs) == 1 and feed_dirs[0] == d: continue
+        if d == exclude_dir: continue
 
         attackables = rc.get_attackable_tiles_from(poi, d, entt)
         score = 0

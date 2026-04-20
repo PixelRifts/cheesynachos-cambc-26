@@ -1,7 +1,7 @@
 # Test runner config for testing/run_tests.py
 
 # Bot to evaluate
-target_bot = "sprint5_unify_evolved"
+target_bot = "sprint5_unify_microing"
 # target_bot = "sprint5_unify_evolved"
 
 # Opponents to test against.
