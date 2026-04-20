@@ -307,9 +307,9 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         pf_state.past_pos = None
         return True
 
-    if pf_state.past_pos != cur and pf_state.past_pos is not None:
-        silly_pathfind_to(rc, sense, pf_state.past_pos)
-        return
+    # if pf_state.past_pos != cur and pf_state.past_pos is not None:
+    #     silly_pathfind_to(rc, sense, pf_state.past_pos)
+    #     return
 
     # start / restart A*
     if ((not pf_state.astar_active and not pf_state.result_path) or pf_state.goal != target or not pf_state.is_cardinal):
@@ -339,7 +339,7 @@ def cardinal_pathfind_to(rc: Controller, sense: Sense, target: Position, going_h
         
         # Possibly fix conveyor this bot is standing on
         conveyor_dir = d
-        entt = sense.get_entity(cur)
+        entt = rc.get_entity_type(rc.get_tile_building_id(cur))
         is_allied = sense.is_allied(cur)
         needs_fix = (entt is None or \
             not (

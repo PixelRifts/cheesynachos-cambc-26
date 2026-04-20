@@ -819,7 +819,8 @@ class BuilderBot(Bot):
                 self.switch_state(BotState.ECON_CONNECT)
                 self.pathfind_target = self.core_pos
                 self.econ_target_is_ax = is_ax
-                self.recompute_econ_connect_target()
+                self.econ_connect_past_pos = self.rc.get_position()
+                # self.recompute_econ_connect_target()
                 self.econ_connect()
                 return
 
